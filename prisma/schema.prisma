@@ -1,0 +1,174 @@
+// KKSDENTAL Lab - Database Schema
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  LAB_STAFF
+  DENTIST
+}
+
+enum DeliveryStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PAID
+  UNPAID
+}
+
+enum TransactionType {
+  PAYMENT
+  ADJUSTMENT
+}
+
+enum TransactionMethod {
+  ONLINE
+  MANUAL
+}
+
+// Every login (admin, lab staff, or dentist/clinic) is a User.
+// Dentist/clinic users have an attached Clinic profile with business details.
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  role         Role
+  clinic       Clinic?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Clinic {
+  id            String        @id @default(uuid())
+  name          String
+  contactPerson String
+  email         String
+  phone         String
+  address       String
+  userId        String        @unique
+  user          User          @relation(fields: [userId], references: [id])
+  patients      Patient[]
+  cases         Case[]
+  transactions  Transaction[]
+  createdAt     DateTime      @default(now())
+}
+
+model Patient {
+  id          String   @id @default(uuid())
+  patientCode String   @unique // e.g. PT-013
+  fullName    String
+  gender      String
+  age         Int
+  clinicId    String
+  clinic      Clinic   @relation(fields: [clinicId], references: [id])
+  cases       Case[]
+  createdAt   DateTime @default(now())
+}
+
+// --- Admin-managed catalog (Services & Pricing, under Account Settings) ---
+
+model Service {
+  id           String           @id @default(uuid())
+  name         String           @unique // e.g. Crown, Bridge, Denture, Night Guard
+  serviceTypes ServiceType[]
+  priceEntries PriceListEntry[]
+  cases        Case[]
+}
+
+model ServiceType {
+  id           String           @id @default(uuid())
+  name         String
+  serviceId    String
+  service      Service          @relation(fields: [serviceId], references: [id])
+  priceEntries PriceListEntry[]
+  cases        Case[]
+}
+
+model Warranty {
+  id           String           @id @default(uuid())
+  label        String           @unique // e.g. "6 Months", "1 Year", "Lifetime"
+  priceEntries PriceListEntry[]
+  cases        Case[]
+}
+
+model ToothShade {
+  id    String @id @default(uuid())
+  code  String @unique // e.g. A1, A2, B1
+  cases Case[]
+}
+
+model PriceListEntry {
+  id            String      @id @default(uuid())
+  serviceId     String
+  serviceTypeId String
+  warrantyId    String
+  price         Decimal     @db.Decimal(10, 2)
+  service       Service     @relation(fields: [serviceId], references: [id])
+  serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id])
+  warranty      Warranty    @relation(fields: [warrantyId], references: [id])
+
+  @@unique([serviceId, serviceTypeId, warrantyId])
+}
+
+// --- Core case/order record ---
+
+model Case {
+  id             String         @id @default(uuid())
+  caseCode       String         @unique // e.g. ORD-0042
+  patientId      String
+  clinicId       String
+  serviceId      String
+  serviceTypeId  String
+  warrantyId     String
+  toothShadeId   String?
+  toothNumbers   String[]       // FDI two-digit codes, e.g. ["11","12","21"]
+  quantity       Int
+  unitPrice      Decimal        @db.Decimal(10, 2)
+  totalPrice     Decimal        @db.Decimal(10, 2)
+  deliveryStatus DeliveryStatus @default(PENDING)
+  paymentStatus  PaymentStatus  @default(UNPAID)
+  createdById    String
+
+  patient     Patient       @relation(fields: [patientId], references: [id])
+  clinic      Clinic        @relation(fields: [clinicId], references: [id])
+  service     Service       @relation(fields: [serviceId], references: [id])
+  serviceType ServiceType   @relation(fields: [serviceTypeId], references: [id])
+  warranty    Warranty      @relation(fields: [warrantyId], references: [id])
+  toothShade  ToothShade?   @relation(fields: [toothShadeId], references: [id])
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// --- Financial ledger: one continuous account per clinic ---
+// Powers Clinic-wise Invoices (client), Invoice tab (admin), and
+// Manage Clinics > Account Summary (admin) - all read from this table.
+model Transaction {
+  id          String             @id @default(uuid())
+  clinicId    String
+  caseId      String?            // optional link to the specific case being paid off
+  amount      Decimal            @db.Decimal(10, 2)
+  type        TransactionType
+  method       TransactionMethod?
+  remarks     String?
+  createdById String
+
+  clinic Clinic @relation(fields: [clinicId], references: [id])
+  case   Case?  @relation(fields: [caseId], references: [id])
+
+  createdAt DateTime @default(now())
+}
