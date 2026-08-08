@@ -7,11 +7,14 @@ const patientsRoutes = require("./routes/patients.routes");
 const casesRoutes = require("./routes/cases.routes");
 const clinicsRoutes = require("./routes/clinics.routes");
 const pricingRoutes = require("./routes/pricing.routes");
+const reportsRoutes = require("./routes/reports.routes");
+const galleryRoutes = require("./routes/gallery.routes");
+const blogRoutes = require("./routes/blog.routes");
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
@@ -20,6 +23,9 @@ app.use("/api/patients", patientsRoutes);
 app.use("/api/cases", casesRoutes);
 app.use("/api/clinics", clinicsRoutes);
 app.use("/api/catalog", pricingRoutes);
+app.use("/api/reports", reportsRoutes);
+app.use("/api/gallery", galleryRoutes);
+app.use("/api/blog", blogRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`KKSDENTAL Lab API running on port ${PORT}`));

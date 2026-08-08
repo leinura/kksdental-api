@@ -6,9 +6,34 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const router = express.Router();
 const prisma = new PrismaClient();
 
+router.use(requireAuth);
+
+// GET/PATCH /api/clinics/me - a dentist/clinic editing their own business
+// details. Placed before the admin-only middleware below so DENTIST role
+// can reach it; everything after that middleware is admin/staff only.
+router.get("/me", requireRole("DENTIST"), async (req, res) => {
+  const clinic = await prisma.clinic.findUnique({ where: { id: req.user.clinicId } });
+  if (!clinic) return res.status(404).json({ error: "Clinic not found" });
+  res.json(clinic);
+});
+
+router.patch("/me", requireRole("DENTIST"), async (req, res) => {
+  const { name, contactPerson, email, phone, address } = req.body;
+  try {
+    const updated = await prisma.clinic.update({
+      where: { id: req.user.clinicId },
+      data: { name, contactPerson, email, phone, address },
+    });
+    res.json(updated);
+  } catch (err) {
+    console.error("Update own clinic error:", err);
+    res.status(500).json({ error: "Failed to update clinic profile" });
+  }
+});
+
 // All routes here are admin/lab-staff only - clinics are created manually,
 // never through self-registration.
-router.use(requireAuth, requireRole("ADMIN", "LAB_STAFF"));
+router.use(requireRole("ADMIN", "LAB_STAFF"));
 
 // GET /api/clinics - Clinic Directory
 router.get("/", async (req, res) => {

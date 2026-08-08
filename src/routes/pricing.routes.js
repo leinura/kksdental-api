@@ -64,4 +64,45 @@ router.post("/price-list", async (req, res) => {
   res.status(201).json(entry);
 });
 
+router.delete("/services/:id", async (req, res) => {
+  try {
+    await prisma.service.delete({ where: { id: req.params.id } });
+    res.json({ message: "Service deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this service has service types or cases linked to it" });
+  }
+});
+
+router.delete("/service-types/:id", async (req, res) => {
+  try {
+    await prisma.serviceType.delete({ where: { id: req.params.id } });
+    res.json({ message: "Service type deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this service type has cases linked to it" });
+  }
+});
+
+router.delete("/warranties/:id", async (req, res) => {
+  try {
+    await prisma.warranty.delete({ where: { id: req.params.id } });
+    res.json({ message: "Warranty deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this warranty has cases linked to it" });
+  }
+});
+
+router.delete("/tooth-shades/:id", async (req, res) => {
+  try {
+    await prisma.toothShade.delete({ where: { id: req.params.id } });
+    res.json({ message: "Tooth shade deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this shade has cases linked to it" });
+  }
+});
+
+router.delete("/price-list/:id", async (req, res) => {
+  await prisma.priceListEntry.delete({ where: { id: req.params.id } });
+  res.json({ message: "Price entry deleted" });
+});
+
 module.exports = router;

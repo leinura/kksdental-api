@@ -47,7 +47,9 @@ model User {
   username     String   @unique
   passwordHash String
   role         Role
+  pushToken    String?
   clinic       Clinic?
+  loginActivities LoginActivity[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -171,5 +173,49 @@ model Transaction {
   clinic Clinic @relation(fields: [clinicId], references: [id])
   case   Case?  @relation(fields: [caseId], references: [id])
 
+  createdAt DateTime @default(now())
+}
+
+// --- Login activity for the Security screen ---
+model LoginActivity {
+  id         String   @id @default(uuid())
+  userId     String
+  ipAddress  String?
+  deviceInfo String? // e.g. "android", "ios" - sent by the app at login time
+  user       User     @relation(fields: [userId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+// --- Gallery & Blog: lab-side marketing content ---
+// Photos stored as base64 directly in the row (simple setup, fine at this
+// scale) rather than an external object store - revisit if the gallery
+// grows large enough that this becomes a performance concern.
+model GalleryPhoto {
+  id           String   @id @default(uuid())
+  imageData    String   @db.Text
+  caption      String?
+  uploadedById String
+  createdAt    DateTime @default(now())
+}
+
+model BlogPost {
+  id        String   @id @default(uuid())
+  title     String
+  content   String   @db.Text
+  imageData String?  @db.Text
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// --- Admin/lab-staff notification feed (new orders, payments) ---
+// Read/unread is tracked globally, not per-user - fine for a small team
+// where anyone marking it read means it's been seen.
+model Notification {
+  id        String   @id @default(uuid())
+  type      String   // "NEW_ORDER" | "PAYMENT"
+  message   String
+  caseId    String?
+  read      Boolean  @default(false)
   createdAt DateTime @default(now())
 }

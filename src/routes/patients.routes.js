@@ -2,6 +2,7 @@ const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { generatePatientCode, generateCaseCode } = require("../utils/codeGenerator");
+const { notifyAdmins } = require("../utils/notifyAdmins");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -79,6 +80,12 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
       });
 
       return { patient, case: newCase };
+    });
+
+    notifyAdmins({
+      type: "NEW_ORDER",
+      message: `New patient registered: ${result.patient.fullName} (${result.case.caseCode})`,
+      caseId: result.case.id,
     });
 
     res.status(201).json(result);
