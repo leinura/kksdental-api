@@ -2,7 +2,6 @@ const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { generatePatientCode, generateCaseCode } = require("../utils/codeGenerator");
-const { notifyAdmins } = require("../utils/notifyAdmins");
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -44,6 +43,18 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
   }
 
   try {
+    const existing = await prisma.patient.findFirst({
+      where: {
+        clinicId: req.user.clinicId,
+        fullName: { equals: fullName, mode: "insensitive" },
+      },
+    });
+    if (existing) {
+      return res.status(409).json({
+        error: `A patient named "${existing.fullName}" is already registered (ID: ${existing.patientCode}). Use Billing to search for and select the existing patient instead of registering them again.`,
+      });
+    }
+
     const finalQuantity = quantity || (toothNumbers ? toothNumbers.length : 1);
     const unitPrice = await lookupUnitPrice(serviceId, serviceTypeId, warrantyId);
     const totalPrice = unitPrice * finalQuantity;
@@ -80,12 +91,6 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
       });
 
       return { patient, case: newCase };
-    });
-
-    notifyAdmins({
-      type: "NEW_ORDER",
-      message: `New patient registered: ${result.patient.fullName} (${result.case.caseCode})`,
-      caseId: result.case.id,
     });
 
     res.status(201).json(result);
