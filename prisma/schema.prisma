@@ -28,9 +28,9 @@ enum PaymentStatus {
   UNPAID
 }
 
-enum TransactionType {
-  PAYMENT
-  ADJUSTMENT
+enum TransactionMethod {
+  CASH
+  UPI
 }
 
 enum TransactionMethod {

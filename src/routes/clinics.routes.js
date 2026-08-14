@@ -31,6 +31,46 @@ router.patch("/me", requireRole("DENTIST"), async (req, res) => {
   }
 });
 
+// GET /api/clinics/:id/ledger
+// Single source of truth for clinic finances - powers Manage Clinics >
+// Account Summary, the admin Invoice detail view, and the client's own
+// Clinic-wise Invoices screen. Placed before the admin-only middleware
+// below so a DENTIST can reach it - but only for their own clinic.
+router.get("/:id/ledger", async (req, res) => {
+  const { id } = req.params;
+
+  if (req.user.role === "DENTIST" && id !== req.user.clinicId) {
+    return res.status(403).json({ error: "You don't have access to this clinic's account" });
+  }
+
+  const [cases, transactions] = await Promise.all([
+    prisma.case.findMany({
+      where: { clinicId: id },
+      include: { patient: true, service: true },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.transaction.findMany({
+      where: { clinicId: id },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  const totalBilled = cases.reduce((sum, c) => sum + Number(c.totalPrice), 0);
+  const totalPaid = transactions
+    .filter((t) => t.type === "PAYMENT")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const totalAdjustment = transactions
+    .filter((t) => t.type === "ADJUSTMENT")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const due = totalBilled - totalPaid - totalAdjustment;
+
+  res.json({
+    cases,
+    transactions,
+    summary: { totalBilled, totalPaid, totalAdjustment, due },
+  });
+});
+
 // All routes here are admin/lab-staff only - clinics are created manually,
 // never through self-registration.
 router.use(requireRole("ADMIN", "LAB_STAFF"));
@@ -108,51 +148,19 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// GET /api/clinics/:id/ledger
-// Single source of truth for clinic finances - powers Manage Clinics >
-// Account Summary, the admin Invoice detail view, and the client's own
-// Clinic-wise Invoices screen (dentists hit this same shape via /me/ledger).
-router.get("/:id/ledger", async (req, res) => {
-  const { id } = req.params;
-
-  const [cases, transactions] = await Promise.all([
-    prisma.case.findMany({
-      where: { clinicId: id },
-      include: { patient: true, service: true },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.transaction.findMany({
-      where: { clinicId: id },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
-
-  const totalBilled = cases.reduce((sum, c) => sum + Number(c.totalPrice), 0);
-  const totalPaid = transactions
-    .filter((t) => t.type === "PAYMENT")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-  const totalAdjustment = transactions
-    .filter((t) => t.type === "ADJUSTMENT")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-  const due = totalBilled - totalPaid - totalAdjustment;
-
-  res.json({
-    cases,
-    transactions,
-    summary: { totalBilled, totalPaid, totalAdjustment, due },
-  });
-});
-
 // POST /api/clinics/:id/transactions - Add Payment / Adjustment
 router.post("/:id/transactions", async (req, res) => {
   const { id } = req.params;
-  const { amount, type, remarks, caseId } = req.body;
+  const { amount, type, method, remarks, caseId } = req.body;
 
   if (!amount || !type) {
     return res.status(400).json({ error: "Amount and type are required" });
   }
   if (!["PAYMENT", "ADJUSTMENT"].includes(type)) {
     return res.status(400).json({ error: "Type must be PAYMENT or ADJUSTMENT" });
+  }
+  if (type === "PAYMENT" && !["CASH", "UPI"].includes(method)) {
+    return res.status(400).json({ error: "method (CASH or UPI) is required for a Payment entry" });
   }
 
   const transaction = await prisma.transaction.create({
@@ -161,7 +169,7 @@ router.post("/:id/transactions", async (req, res) => {
       caseId: caseId || null,
       amount,
       type,
-      method: "MANUAL",
+      method: type === "PAYMENT" ? method : null,
       remarks: remarks || null,
       createdById: req.user.id,
     },
