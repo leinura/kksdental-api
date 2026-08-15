@@ -43,32 +43,37 @@ router.get("/:id/ledger", async (req, res) => {
     return res.status(403).json({ error: "You don't have access to this clinic's account" });
   }
 
-  const [cases, transactions] = await Promise.all([
-    prisma.case.findMany({
-      where: { clinicId: id },
-      include: { patient: true, service: true },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.transaction.findMany({
-      where: { clinicId: id },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
+  try {
+    const [cases, transactions] = await Promise.all([
+      prisma.case.findMany({
+        where: { clinicId: id },
+        include: { patient: true, service: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.transaction.findMany({
+        where: { clinicId: id },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
-  const totalBilled = cases.reduce((sum, c) => sum + Number(c.totalPrice), 0);
-  const totalPaid = transactions
-    .filter((t) => t.type === "PAYMENT")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-  const totalAdjustment = transactions
-    .filter((t) => t.type === "ADJUSTMENT")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-  const due = totalBilled - totalPaid - totalAdjustment;
+    const totalBilled = cases.reduce((sum, c) => sum + Number(c.totalPrice), 0);
+    const totalPaid = transactions
+      .filter((t) => t.type === "PAYMENT")
+      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const totalAdjustment = transactions
+      .filter((t) => t.type === "ADJUSTMENT")
+      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const due = totalBilled - totalPaid - totalAdjustment;
 
-  res.json({
-    cases,
-    transactions,
-    summary: { totalBilled, totalPaid, totalAdjustment, due },
-  });
+    res.json({
+      cases,
+      transactions,
+      summary: { totalBilled, totalPaid, totalAdjustment, due },
+    });
+  } catch (err) {
+    console.error("Ledger fetch error:", err);
+    res.status(500).json({ error: "Failed to load ledger" });
+  }
 });
 
 // All routes here are admin/lab-staff only - clinics are created manually,
