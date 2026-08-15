@@ -62,9 +62,10 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
       },
     });
 
+    const clinic = await prisma.clinic.findUnique({ where: { id: req.user.clinicId }, select: { name: true } });
     notifyAdmins({
       type: "NEW_ORDER",
-      message: `New order from clinic: ${newCase.caseCode}`,
+      message: `New order from clinic ${clinic?.name || "Unknown"}: ${newCase.caseCode}`,
       caseId: newCase.id,
     });
 
