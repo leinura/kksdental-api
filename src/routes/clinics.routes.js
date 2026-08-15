@@ -119,18 +119,22 @@ router.post("/", async (req, res) => {
   }
 });
 
-// PUT /api/clinics/:id - Edit clinic info, optionally reset login credentials
+// PUT /api/clinics/:id - Edit clinic info, optionally reset login credentials,
+// optionally toggle active/inactive (used by the "Deactivate/Reactivate" action).
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, contactPerson, email, phone, address, username, password } = req.body;
+  const { name, contactPerson, email, phone, address, username, password, active } = req.body;
 
   try {
     const clinic = await prisma.clinic.findUnique({ where: { id } });
     if (!clinic) return res.status(404).json({ error: "Clinic not found" });
 
+    const clinicUpdate = { name, contactPerson, email, phone, address };
+    if (typeof active === "boolean") clinicUpdate.active = active;
+
     await prisma.clinic.update({
       where: { id },
-      data: { name, contactPerson, email, phone, address },
+      data: clinicUpdate,
     });
 
     // Password left blank means "keep current password" - only touch the

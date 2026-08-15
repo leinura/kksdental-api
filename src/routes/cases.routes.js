@@ -102,6 +102,34 @@ router.get("/", async (req, res) => {
   res.json(cases);
 });
 
+// GET /api/cases/:id - full single-order detail, powers Order Detail on
+// admin (from Orders tab and from tapping a Notification) and can be reused
+// client-side later too. Dentists can only view their own clinic's orders.
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const singleCase = await prisma.case.findUnique({
+    where: { id },
+    include: {
+      patient: true,
+      clinic: true,
+      service: true,
+      serviceType: true,
+      warranty: true,
+      toothShade: true,
+      transactions: { orderBy: { createdAt: "desc" } },
+    },
+  });
+
+  if (!singleCase) return res.status(404).json({ error: "Order not found" });
+
+  if (req.user.role === "DENTIST" && singleCase.clinicId !== req.user.clinicId) {
+    return res.status(403).json({ error: "You don't have access to this order" });
+  }
+
+  res.json(singleCase);
+});
+
 // PATCH /api/cases/:id/status - Track Orders: update delivery/payment status.
 // Admin/lab staff only. Marking paymentStatus PAID requires specifying
 // paymentMethod (CASH or UPI) so the resulting Transaction records how the

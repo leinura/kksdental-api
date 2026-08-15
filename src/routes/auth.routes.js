@@ -34,6 +34,9 @@ router.post("/login", async (req, res) => {
     if (!passwordMatches) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
+    if (user.clinic && !user.clinic.active) {
+      return res.status(403).json({ error: "This clinic account has been deactivated. Contact the lab for assistance." });
+    }
 
     // Fire-and-forget - a logging failure should never block a successful login.
     prisma.loginActivity
