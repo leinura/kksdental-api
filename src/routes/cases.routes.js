@@ -102,9 +102,7 @@ router.get("/", async (req, res) => {
   res.json(cases);
 });
 
-// GET /api/cases/:id - full single-order detail, powers Order Detail on
-// admin (from Orders tab, Notifications, and the For Lab tab). Dentists can
-// only view their own clinic's orders.
+// GET /api/cases/:id - full single-order detail
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 

@@ -138,6 +138,7 @@ router.get("/search", requireRole("DENTIST"), async (req, res) => {
   res.json(patients);
 });
 
+
 // GET /api/patients/:id - Patient detail (the "Details" link on Patient List)
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
