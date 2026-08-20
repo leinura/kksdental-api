@@ -76,14 +76,18 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
   }
 });
 
-// GET /api/cases - Your Order (dentist, own clinic) / Orders + Track Orders (admin, all clinics)
-// Query params: from, to (date range), deliveryStatus, paymentStatus
+// GET /api/cases - Your Order (dentist, own clinic) / Orders + Track Orders +
+// For Lab (admin, all clinics). Query params: from, to (date range),
+// deliveryStatus, paymentStatus, clinicId (used by the For Lab tab to scope
+// to a single clinic's orders).
 router.get("/", async (req, res) => {
-  const { from, to, deliveryStatus, paymentStatus } = req.query;
+  const { from, to, deliveryStatus, paymentStatus, clinicId } = req.query;
 
   const where = {};
   if (req.user.role === "DENTIST") {
     where.clinicId = req.user.clinicId;
+  } else if (clinicId) {
+    where.clinicId = clinicId;
   }
   if (from || to) {
     where.createdAt = {};
@@ -103,8 +107,8 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/cases/:id - full single-order detail, powers Order Detail on
-// admin (from Orders tab and from tapping a Notification) and can be reused
-// client-side later too. Dentists can only view their own clinic's orders.
+// admin (from Orders tab, Notifications, and the For Lab tab). Dentists can
+// only view their own clinic's orders.
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
