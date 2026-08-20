@@ -37,6 +37,7 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
     toothShadeId,
     toothNumbers, // array of FDI codes, e.g. ["11","12"]
     quantity, // optional - defaults to toothNumbers.length
+    comment, // optional free-text note from the clinic
   } = req.body;
 
   if (!fullName || !gender || !age || !serviceId || !serviceTypeId || !warrantyId) {
@@ -84,6 +85,7 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
           warrantyId,
           toothShadeId: toothShadeId || null,
           toothNumbers: toothNumbers || [],
+          comment: comment || null,
           quantity: finalQuantity,
           unitPrice,
           totalPrice,

@@ -22,13 +22,8 @@ async function lookupUnitPrice(serviceId, serviceTypeId, warrantyId) {
 }
 
 // POST /api/cases - Billing screen: new order for an already-registered patient.
-// Every order starts UNPAID regardless of "Order Now" vs "Order & Pay" - both
-// Cash and UPI require an admin to actually confirm receipt afterward
-// (via Track Orders or Manage Clinics), so no payment is ever auto-marked
-// paid at order-creation time. "Order & Pay" is purely a frontend UX flow
-// that shows the clinic how to pay (cash reminder or the UPI QR code).
 router.post("/", requireRole("DENTIST"), async (req, res) => {
-  const { patientId, serviceId, serviceTypeId, warrantyId, toothShadeId, toothNumbers, quantity } = req.body;
+  const { patientId, serviceId, serviceTypeId, warrantyId, toothShadeId, toothNumbers, quantity, comment } = req.body;
 
   if (!patientId || !serviceId || !serviceTypeId || !warrantyId) {
     return res.status(400).json({ error: "Missing required case fields" });
@@ -55,6 +50,7 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
         warrantyId,
         toothShadeId: toothShadeId || null,
         toothNumbers: toothNumbers || [],
+        comment: comment || null,
         quantity: finalQuantity,
         unitPrice,
         totalPrice,
@@ -135,9 +131,6 @@ router.get("/:id", async (req, res) => {
 });
 
 // PATCH /api/cases/:id/status - Track Orders: update delivery/payment status.
-// Admin/lab staff only. Marking paymentStatus PAID requires specifying
-// paymentMethod (CASH or UPI) so the resulting Transaction records how the
-// clinic actually paid.
 router.patch("/:id/status", requireRole("ADMIN", "LAB_STAFF"), async (req, res) => {
   const { id } = req.params;
   const { deliveryStatus, paymentStatus, paymentMethod } = req.body;
