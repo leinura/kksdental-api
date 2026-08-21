@@ -145,6 +145,7 @@ model Case {
   toothShadeId   String?
   toothNumbers   String[] // FDI two-digit codes, e.g. ["11","12","21"]
   comment        String?        @db.Text
+  pickedUpAt DateTime?
   photos         CasePhoto[]
   quantity       Int
   unitPrice      Decimal        @db.Decimal(10, 2)

@@ -181,4 +181,21 @@ router.patch("/:id/status", requireRole("ADMIN", "LAB_STAFF"), async (req, res) 
   res.json(updated);
 });
 
+// PATCH /api/cases/:id/pickup - Order Detail: lab staff marks an order as
+// physically picked up. Separate from delivery/payment status - this is
+// purely a "has someone from the lab collected this yet" flag.
+router.patch("/:id/pickup", requireRole("ADMIN", "LAB_STAFF"), async (req, res) => {
+  const { id } = req.params;
+
+  const existing = await prisma.case.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "Order not found" });
+
+  const updated = await prisma.case.update({
+    where: { id },
+    data: { pickedUpAt: new Date() },
+  });
+
+  res.json(updated);
+});
+
 module.exports = router;
