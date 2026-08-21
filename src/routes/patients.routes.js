@@ -38,6 +38,7 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
     toothNumbers, // array of FDI codes, e.g. ["11","12"]
     quantity, // optional - defaults to toothNumbers.length
     comment, // optional free-text note from the clinic
+    photos, // optional array of base64 data-URI strings
   } = req.body;
 
   if (!fullName || !gender || !age || !serviceId || !serviceTypeId || !warrantyId) {
@@ -93,6 +94,12 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
         },
       });
 
+      if (Array.isArray(photos) && photos.length > 0) {
+        await tx.casePhoto.createMany({
+          data: photos.map((imageData) => ({ caseId: newCase.id, imageData })),
+        });
+      }
+
       return { patient, case: newCase };
     });
 
@@ -137,7 +144,6 @@ router.get("/search", requireRole("DENTIST"), async (req, res) => {
   });
   res.json(patients);
 });
-
 
 // GET /api/patients/:id - Patient detail (the "Details" link on Patient List)
 router.get("/:id", async (req, res) => {

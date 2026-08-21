@@ -145,6 +145,7 @@ model Case {
   toothShadeId   String?
   toothNumbers   String[] // FDI two-digit codes, e.g. ["11","12","21"]
   comment        String?        @db.Text
+  photos         CasePhoto[]
   quantity       Int
   unitPrice      Decimal        @db.Decimal(10, 2)
   totalPrice     Decimal        @db.Decimal(10, 2)
@@ -162,6 +163,13 @@ model Case {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+model CasePhoto {
+  id        String   @id @default(uuid())
+  caseId    String
+  case      Case     @relation(fields: [caseId], references: [id])
+  imageData String   @db.Text
+  createdAt DateTime @default(now())
 }
 
 // --- Financial ledger: one continuous account per clinic ---

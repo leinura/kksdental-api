@@ -23,7 +23,8 @@ async function lookupUnitPrice(serviceId, serviceTypeId, warrantyId) {
 
 // POST /api/cases - Billing screen: new order for an already-registered patient.
 router.post("/", requireRole("DENTIST"), async (req, res) => {
-  const { patientId, serviceId, serviceTypeId, warrantyId, toothShadeId, toothNumbers, quantity, comment } = req.body;
+  const { patientId, serviceId, serviceTypeId, warrantyId, toothShadeId, toothNumbers, quantity, comment, photos } =
+    req.body;
 
   if (!patientId || !serviceId || !serviceTypeId || !warrantyId) {
     return res.status(400).json({ error: "Missing required case fields" });
@@ -40,22 +41,32 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
     const totalPrice = unitPrice * finalQuantity;
     const caseCode = await generateCaseCode();
 
-    const newCase = await prisma.case.create({
-      data: {
-        caseCode,
-        patientId,
-        clinicId: req.user.clinicId,
-        serviceId,
-        serviceTypeId,
-        warrantyId,
-        toothShadeId: toothShadeId || null,
-        toothNumbers: toothNumbers || [],
-        comment: comment || null,
-        quantity: finalQuantity,
-        unitPrice,
-        totalPrice,
-        createdById: req.user.id,
-      },
+    const newCase = await prisma.$transaction(async (tx) => {
+      const createdCase = await tx.case.create({
+        data: {
+          caseCode,
+          patientId,
+          clinicId: req.user.clinicId,
+          serviceId,
+          serviceTypeId,
+          warrantyId,
+          toothShadeId: toothShadeId || null,
+          toothNumbers: toothNumbers || [],
+          comment: comment || null,
+          quantity: finalQuantity,
+          unitPrice,
+          totalPrice,
+          createdById: req.user.id,
+        },
+      });
+
+      if (Array.isArray(photos) && photos.length > 0) {
+        await tx.casePhoto.createMany({
+          data: photos.map((imageData) => ({ caseId: createdCase.id, imageData })),
+        });
+      }
+
+      return createdCase;
     });
 
     const clinic = await prisma.clinic.findUnique({ where: { id: req.user.clinicId }, select: { name: true } });
@@ -102,7 +113,8 @@ router.get("/", async (req, res) => {
   res.json(cases);
 });
 
-// GET /api/cases/:id - full single-order detail
+// GET /api/cases/:id - full single-order detail, now including uploaded
+// patient photos.
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -116,6 +128,7 @@ router.get("/:id", async (req, res) => {
       warranty: true,
       toothShade: true,
       transactions: { orderBy: { createdAt: "desc" } },
+      photos: { orderBy: { createdAt: "asc" } },
     },
   });
 
