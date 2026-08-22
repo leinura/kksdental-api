@@ -11,6 +11,7 @@ const reportsRoutes = require("./routes/reports.routes");
 const galleryRoutes = require("./routes/gallery.routes");
 const blogRoutes = require("./routes/blog.routes");
 const notificationsRoutes = require("./routes/notifications.routes");
+const staffRoutes = require("./routes/staff.routes");
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.use("/api/reports", reportsRoutes);
 app.use("/api/gallery", galleryRoutes);
 app.use("/api/blog", blogRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/staff", staffRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`KKSDENTAL Lab API running on port ${PORT}`));

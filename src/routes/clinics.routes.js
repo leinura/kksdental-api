@@ -10,7 +10,7 @@ router.use(requireAuth);
 
 // GET/PATCH /api/clinics/me - a dentist/clinic editing their own business
 // details. Placed before the admin-only middleware below so DENTIST role
-// can reach it; everything after that middleware is admin/staff only.
+// can reach it; everything after that middleware is admin only.
 router.get("/me", requireRole("DENTIST"), async (req, res) => {
   const clinic = await prisma.clinic.findUnique({ where: { id: req.user.clinicId } });
   if (!clinic) return res.status(404).json({ error: "Clinic not found" });
@@ -34,11 +34,15 @@ router.patch("/me", requireRole("DENTIST"), async (req, res) => {
 // GET /api/clinics/:id/ledger
 // Single source of truth for clinic finances - powers Manage Clinics >
 // Account Summary, the admin Invoice detail view, and the client's own
-// Clinic-wise Invoices screen. Placed before the admin-only middleware
-// below so a DENTIST can reach it - but only for their own clinic.
+// Clinic-wise Invoices screen. A DENTIST can reach this for their own
+// clinic only. LAB_STAFF is explicitly blocked - financial data isn't
+// part of their job, even though they can see order data elsewhere.
 router.get("/:id/ledger", async (req, res) => {
   const { id } = req.params;
 
+  if (req.user.role === "LAB_STAFF") {
+    return res.status(403).json({ error: "You don't have access to billing information" });
+  }
   if (req.user.role === "DENTIST" && id !== req.user.clinicId) {
     return res.status(403).json({ error: "You don't have access to this clinic's account" });
   }
@@ -76,18 +80,20 @@ router.get("/:id/ledger", async (req, res) => {
   }
 });
 
-// All routes here are admin/lab-staff only - clinics are created manually,
-// never through self-registration.
-router.use(requireRole("ADMIN", "LAB_STAFF"));
-
-// GET /api/clinics - Clinic Directory
-router.get("/", async (req, res) => {
+// GET /api/clinics - Clinic Directory. Admin AND lab staff can list
+// clinics (staff need this for the For Lab tab's clinic picker) - this
+// is just names/contact info, not financial data.
+router.get("/", requireRole("ADMIN", "LAB_STAFF"), async (req, res) => {
   const clinics = await prisma.clinic.findMany({
     include: { user: { select: { email: true, username: true } } },
     orderBy: { createdAt: "desc" },
   });
   res.json(clinics);
 });
+
+// Everything below is genuinely billing/account-management territory -
+// admin only, lab staff excluded entirely.
+router.use(requireRole("ADMIN"));
 
 // POST /api/clinics - Add New Clinic (creates Clinic + linked User in one go)
 router.post("/", async (req, res) => {
@@ -137,8 +143,6 @@ router.put("/:id", async (req, res) => {
       data: clinicUpdate,
     });
 
-    // Password left blank means "keep current password" - only touch the
-    // User record if a new username or password was actually provided.
     if (username || password) {
       const userUpdate = {};
       if (username) userUpdate.username = username;
