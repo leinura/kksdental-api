@@ -74,6 +74,22 @@ model Clinic {
   transactions  Transaction[]
   createdAt     DateTime      @default(now())
 }
+model Advertisement {
+  id        String   @id @default(uuid())
+  imageData String   @db.Text
+  link      String?
+  createdAt DateTime @default(now())
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  title       String
+  description String?  @db.Text
+  imageData   String?  @db.Text
+  link        String?
+  phone       String?
+  createdAt   DateTime @default(now())
+}
 
 model Patient {
   id          String   @id @default(uuid())
