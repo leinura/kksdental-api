@@ -3,29 +3,16 @@ const { PrismaClient } = require("@prisma/client");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { generatePatientCode, generateCaseCode } = require("../utils/codeGenerator");
 const { notifyAdmins } = require("../utils/notifyAdmins");
+const { computeOrderPricing } = require("../utils/priceLookup");
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 router.use(requireAuth);
 
-// Shared price lookup: Service x ServiceType x Warranty -> unit price.
-// Price is copied onto the Case at creation time so historical orders keep
-// their original price even if the admin price list changes later.
-async function lookupUnitPrice(serviceId, serviceTypeId, warrantyId) {
-  const entry = await prisma.priceListEntry.findUnique({
-    where: {
-      serviceId_serviceTypeId_warrantyId: { serviceId, serviceTypeId, warrantyId },
-    },
-  });
-  if (!entry) {
-    throw new Error("No price configured for this Service / Service Type / Warranty combination");
-  }
-  return Number(entry.price);
-}
-
 // POST /api/patients/register - Patient Registration screen (new patients only)
 // Dentist only. Creates the Patient profile and their first Case together.
+// Supports the same three pricing paths as Billing (see priceLookup.js).
 router.post("/register", requireRole("DENTIST"), async (req, res) => {
   const {
     fullName,
@@ -34,6 +21,9 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
     serviceId,
     serviceTypeId,
     warrantyId,
+    serviceSubtypeId,
+    serviceTypeWarrantyId,
+    stepIds,
     toothShadeId,
     toothNumbers, // array of FDI codes, e.g. ["11","12"]
     quantity, // optional - defaults to toothNumbers.length
@@ -41,7 +31,7 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
     photos, // optional array of base64 data-URI strings
   } = req.body;
 
-  if (!fullName || !gender || !age || !serviceId || !serviceTypeId || !warrantyId) {
+  if (!fullName || !gender || !age || !serviceId || !serviceTypeId) {
     return res.status(400).json({ error: "Missing required patient or case fields" });
   }
 
@@ -58,9 +48,16 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
       });
     }
 
-    const finalQuantity = quantity || (toothNumbers ? toothNumbers.length : 1);
-    const unitPrice = await lookupUnitPrice(serviceId, serviceTypeId, warrantyId);
-    const totalPrice = unitPrice * finalQuantity;
+    const pricing = await computeOrderPricing({
+      serviceId,
+      serviceTypeId,
+      warrantyId,
+      serviceSubtypeId,
+      serviceTypeWarrantyId,
+      stepIds,
+      quantity,
+      toothNumbers,
+    });
 
     const patientCode = await generatePatientCode();
     const caseCode = await generateCaseCode();
@@ -83,16 +80,29 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
           clinicId: req.user.clinicId,
           serviceId,
           serviceTypeId,
-          warrantyId,
+          warrantyId: warrantyId || null,
+          serviceSubtypeId: serviceSubtypeId || null,
+          serviceTypeWarrantyId: serviceTypeWarrantyId || null,
           toothShadeId: toothShadeId || null,
           toothNumbers: toothNumbers || [],
           comment: comment || null,
-          quantity: finalQuantity,
-          unitPrice,
-          totalPrice,
+          quantity: pricing.quantity,
+          unitPrice: pricing.unitPrice,
+          totalPrice: pricing.totalPrice,
           createdById: req.user.id,
         },
       });
+
+      if (pricing.resolvedSteps.length > 0) {
+        await tx.caseStep.createMany({
+          data: pricing.resolvedSteps.map((s) => ({
+            caseId: newCase.id,
+            serviceStepId: s.serviceStepId,
+            name: s.name,
+            price: s.price,
+          })),
+        });
+      }
 
       if (Array.isArray(photos) && photos.length > 0) {
         await tx.casePhoto.createMany({

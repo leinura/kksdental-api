@@ -3,30 +3,33 @@ const { PrismaClient } = require("@prisma/client");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { generateCaseCode } = require("../utils/codeGenerator");
 const { notifyAdmins } = require("../utils/notifyAdmins");
+const { computeOrderPricing } = require("../utils/priceLookup");
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 router.use(requireAuth);
 
-async function lookupUnitPrice(serviceId, serviceTypeId, warrantyId) {
-  const entry = await prisma.priceListEntry.findUnique({
-    where: {
-      serviceId_serviceTypeId_warrantyId: { serviceId, serviceTypeId, warrantyId },
-    },
-  });
-  if (!entry) {
-    throw new Error("No price configured for this Service / Service Type / Warranty combination");
-  }
-  return Number(entry.price);
-}
-
 // POST /api/cases - Billing screen: new order for an already-registered patient.
+// Supports three pricing paths (see priceLookup.js) - the frontend sends
+// whichever fields match the chosen Service Type's configuration.
 router.post("/", requireRole("DENTIST"), async (req, res) => {
-  const { patientId, serviceId, serviceTypeId, warrantyId, toothShadeId, toothNumbers, quantity, comment, photos } =
-    req.body;
+  const {
+    patientId,
+    serviceId,
+    serviceTypeId,
+    warrantyId,
+    serviceSubtypeId,
+    serviceTypeWarrantyId,
+    stepIds,
+    toothShadeId,
+    toothNumbers,
+    quantity,
+    comment,
+    photos,
+  } = req.body;
 
-  if (!patientId || !serviceId || !serviceTypeId || !warrantyId) {
+  if (!patientId || !serviceId || !serviceTypeId) {
     return res.status(400).json({ error: "Missing required case fields" });
   }
 
@@ -36,9 +39,16 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
       return res.status(404).json({ error: "Patient not found for this clinic" });
     }
 
-    const finalQuantity = quantity || (toothNumbers ? toothNumbers.length : 1);
-    const unitPrice = await lookupUnitPrice(serviceId, serviceTypeId, warrantyId);
-    const totalPrice = unitPrice * finalQuantity;
+    const pricing = await computeOrderPricing({
+      serviceId,
+      serviceTypeId,
+      warrantyId,
+      serviceSubtypeId,
+      serviceTypeWarrantyId,
+      stepIds,
+      quantity,
+      toothNumbers,
+    });
     const caseCode = await generateCaseCode();
 
     const newCase = await prisma.$transaction(async (tx) => {
@@ -49,16 +59,29 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
           clinicId: req.user.clinicId,
           serviceId,
           serviceTypeId,
-          warrantyId,
+          warrantyId: warrantyId || null,
+          serviceSubtypeId: serviceSubtypeId || null,
+          serviceTypeWarrantyId: serviceTypeWarrantyId || null,
           toothShadeId: toothShadeId || null,
           toothNumbers: toothNumbers || [],
           comment: comment || null,
-          quantity: finalQuantity,
-          unitPrice,
-          totalPrice,
+          quantity: pricing.quantity,
+          unitPrice: pricing.unitPrice,
+          totalPrice: pricing.totalPrice,
           createdById: req.user.id,
         },
       });
+
+      if (pricing.resolvedSteps.length > 0) {
+        await tx.caseStep.createMany({
+          data: pricing.resolvedSteps.map((s) => ({
+            caseId: createdCase.id,
+            serviceStepId: s.serviceStepId,
+            name: s.name,
+            price: s.price,
+          })),
+        });
+      }
 
       if (Array.isArray(photos) && photos.length > 0) {
         await tx.casePhoto.createMany({
@@ -113,8 +136,9 @@ router.get("/", async (req, res) => {
   res.json(cases);
 });
 
-// GET /api/cases/:id - full single-order detail, now including uploaded
-// patient photos.
+// GET /api/cases/:id - full single-order detail, including uploaded patient
+// photos, and now the Sub-Type / Service-Type-Warranty / step breakdown
+// when the order used the newer pricing paths.
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -127,6 +151,9 @@ router.get("/:id", async (req, res) => {
       serviceType: true,
       warranty: true,
       toothShade: true,
+      serviceSubtype: true,
+      serviceTypeWarranty: true,
+      caseSteps: true,
       transactions: { orderBy: { createdAt: "desc" } },
       photos: { orderBy: { createdAt: "asc" } },
     },

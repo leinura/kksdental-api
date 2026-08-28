@@ -9,8 +9,21 @@ const prisma = new PrismaClient();
 // lists to populate the Patient Registration / Billing dropdowns.
 router.use(requireAuth);
 
+// Deeply nested: each ServiceType now carries its own Sub-Types (with their
+// prices), its own Service-Type-scoped Warranties, and its own Steps (for
+// usesSteps ServiceTypes) - everything the order form needs in one call.
 router.get("/services", async (req, res) => {
-  const services = await prisma.service.findMany({ include: { serviceTypes: true } });
+  const services = await prisma.service.findMany({
+    include: {
+      serviceTypes: {
+        include: {
+          subtypes: { include: { priceEntries: true } },
+          typeWarranties: true,
+          steps: true,
+        },
+      },
+    },
+  });
   res.json(services);
 });
 
@@ -44,6 +57,22 @@ router.post("/service-types", async (req, res) => {
   res.status(201).json(serviceType);
 });
 
+// PUT /api/catalog/service-types/:id - toggle whether this Service Type
+// uses step-based pricing (Complete Denture style) instead of the
+// Sub-Type/Warranty or legacy Warranty pricing.
+router.put("/service-types/:id", async (req, res) => {
+  const { name, usesSteps } = req.body;
+  try {
+    const data = {};
+    if (name !== undefined) data.name = name;
+    if (usesSteps !== undefined) data.usesSteps = usesSteps;
+    const serviceType = await prisma.serviceType.update({ where: { id: req.params.id }, data });
+    res.json(serviceType);
+  } catch (err) {
+    res.status(404).json({ error: "Service type not found" });
+  }
+});
+
 router.post("/warranties", async (req, res) => {
   const warranty = await prisma.warranty.create({ data: { label: req.body.label } });
   res.status(201).json(warranty);
@@ -63,6 +92,108 @@ router.post("/price-list", async (req, res) => {
   });
   res.status(201).json(entry);
 });
+
+// --- Sub-Types (e.g. "Premium Zirconia" under Crown > ALL CERAMIC) ---
+
+router.post("/service-subtypes", async (req, res) => {
+  const { name, serviceTypeId } = req.body;
+  if (!name || !serviceTypeId) {
+    return res.status(400).json({ error: "name and serviceTypeId are required" });
+  }
+  const subtype = await prisma.serviceSubtype.create({ data: { name, serviceTypeId } });
+  res.status(201).json(subtype);
+});
+
+router.delete("/service-subtypes/:id", async (req, res) => {
+  try {
+    await prisma.serviceSubtype.delete({ where: { id: req.params.id } });
+    res.json({ message: "Sub-type deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this sub-type has prices or cases linked to it" });
+  }
+});
+
+// --- Service-Type-scoped Warranties (e.g. ALL CERAMIC's own 5/10/15 Year options) ---
+
+router.post("/service-type-warranties", async (req, res) => {
+  const { label, serviceTypeId } = req.body;
+  if (!label || !serviceTypeId) {
+    return res.status(400).json({ error: "label and serviceTypeId are required" });
+  }
+  const warranty = await prisma.serviceTypeWarranty.create({ data: { label, serviceTypeId } });
+  res.status(201).json(warranty);
+});
+
+router.delete("/service-type-warranties/:id", async (req, res) => {
+  try {
+    await prisma.serviceTypeWarranty.delete({ where: { id: req.params.id } });
+    res.json({ message: "Warranty deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this warranty has prices or cases linked to it" });
+  }
+});
+
+// --- Sub-Type x Warranty prices ---
+// serviceTypeWarrantyId may be omitted/null for Service Types with no
+// warranty at all (like METAL) - price is then keyed on Sub-Type alone.
+
+router.post("/subtype-price-list", async (req, res) => {
+  const { serviceSubtypeId, serviceTypeWarrantyId, price } = req.body;
+  if (!serviceSubtypeId || price == null) {
+    return res.status(400).json({ error: "serviceSubtypeId and price are required" });
+  }
+  const entry = await prisma.subtypePriceEntry.upsert({
+    where: {
+      serviceSubtypeId_serviceTypeWarrantyId: {
+        serviceSubtypeId,
+        serviceTypeWarrantyId: serviceTypeWarrantyId || null,
+      },
+    },
+    update: { price },
+    create: { serviceSubtypeId, serviceTypeWarrantyId: serviceTypeWarrantyId || null, price },
+  });
+  res.status(201).json(entry);
+});
+
+router.delete("/subtype-price-list/:id", async (req, res) => {
+  await prisma.subtypePriceEntry.delete({ where: { id: req.params.id } });
+  res.json({ message: "Price entry deleted" });
+});
+
+// --- Steps (e.g. "Special Tray", "Teeth Setting per Arch" under Complete Denture) ---
+
+router.post("/service-steps", async (req, res) => {
+  const { name, price, serviceTypeId } = req.body;
+  if (!name || price == null || !serviceTypeId) {
+    return res.status(400).json({ error: "name, price, and serviceTypeId are required" });
+  }
+  const step = await prisma.serviceStep.create({ data: { name, price, serviceTypeId } });
+  res.status(201).json(step);
+});
+
+router.put("/service-steps/:id", async (req, res) => {
+  const { name, price } = req.body;
+  try {
+    const data = {};
+    if (name !== undefined) data.name = name;
+    if (price !== undefined) data.price = price;
+    const step = await prisma.serviceStep.update({ where: { id: req.params.id }, data });
+    res.json(step);
+  } catch (err) {
+    res.status(404).json({ error: "Step not found" });
+  }
+});
+
+router.delete("/service-steps/:id", async (req, res) => {
+  try {
+    await prisma.serviceStep.delete({ where: { id: req.params.id } });
+    res.json({ message: "Step deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this step has cases linked to it" });
+  }
+});
+
+// --- Existing entities ---
 
 router.delete("/services/:id", async (req, res) => {
   try {

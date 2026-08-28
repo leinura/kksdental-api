@@ -38,11 +38,6 @@ enum TransactionMethod {
   UPI
 }
 
-//enum TransactionMethod {
-//ONLINE
-//MANUAL
-//}
-
 // Every login (admin, lab staff, or dentist/clinic) is a User.
 // Dentist/clinic users have an attached Clinic profile with business details.
 model User {
@@ -74,6 +69,7 @@ model Clinic {
   transactions  Transaction[]
   createdAt     DateTime      @default(now())
 }
+
 model Advertisement {
   id        String   @id @default(uuid())
   imageData String   @db.Text
@@ -113,15 +109,86 @@ model Service {
   cases        Case[]
 }
 
+// A ServiceType (e.g. "ALL CERAMIC", "PFM", "METAL" under Crown) can use
+// EITHER the classic single-price flow (via PriceListEntry + Warranty,
+// original two-level system) OR the newer Subtype+ServiceTypeWarranty
+// flow, OR the step-based flow (usesSteps) - whichever fits that service.
 model ServiceType {
-  id           String           @id @default(uuid())
-  name         String
-  serviceId    String
-  service      Service          @relation(fields: [serviceId], references: [id])
-  priceEntries PriceListEntry[]
-  cases        Case[]
+  id             String                @id @default(uuid())
+  name           String
+  usesSteps      Boolean               @default(false)
+  serviceId      String
+  service        Service               @relation(fields: [serviceId], references: [id])
+  priceEntries   PriceListEntry[]
+  cases          Case[]
+  subtypes       ServiceSubtype[]
+  typeWarranties ServiceTypeWarranty[]
+  steps          ServiceStep[]
 }
 
+// Sits under a ServiceType (e.g. "Premium Zirconia" under "ALL CERAMIC")
+model ServiceSubtype {
+  id            String              @id @default(uuid())
+  name          String
+  serviceTypeId String
+  serviceType   ServiceType         @relation(fields: [serviceTypeId], references: [id])
+  priceEntries  SubtypePriceEntry[]
+  cases         Case[]
+}
+
+// Warranty options scoped to ONE specific Service Type (not shared/global) -
+// e.g. ALL CERAMIC has its own 5/10/15 Year options, PFM has its own 3/5
+// Year options, METAL has none at all.
+model ServiceTypeWarranty {
+  id            String              @id @default(uuid())
+  label         String
+  serviceTypeId String
+  serviceType   ServiceType         @relation(fields: [serviceTypeId], references: [id])
+  priceEntries  SubtypePriceEntry[]
+  cases         Case[]
+}
+
+// The actual price for a Subtype x Warranty combination.
+// serviceTypeWarrantyId is optional - Service Types with no warranty (like
+// METAL) just price by subtype alone.
+model SubtypePriceEntry {
+  id                    String               @id @default(uuid())
+  serviceSubtypeId      String
+  serviceTypeWarrantyId String?
+  price                 Decimal              @db.Decimal(10, 2)
+  serviceSubtype        ServiceSubtype       @relation(fields: [serviceSubtypeId], references: [id])
+  serviceTypeWarranty   ServiceTypeWarranty? @relation(fields: [serviceTypeWarrantyId], references: [id])
+
+  @@unique([serviceSubtypeId, serviceTypeWarrantyId])
+}
+
+// Individual priced steps for step-based Service Types (Complete Denture
+// etc.) - e.g. "Special Tray", "Teeth Setting per Arch". A case using this
+// ServiceType picks one or more steps; the total is their sum.
+model ServiceStep {
+  id            String      @id @default(uuid())
+  name          String
+  price         Decimal     @db.Decimal(10, 2)
+  serviceTypeId String
+  serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id])
+  caseSteps     CaseStep[]
+}
+
+// Records which steps were picked for a specific order, with price
+// snapshotted at order time (so later price changes don't rewrite history).
+model CaseStep {
+  id            String      @id @default(uuid())
+  caseId        String
+  case          Case        @relation(fields: [caseId], references: [id])
+  serviceStepId String
+  serviceStep   ServiceStep @relation(fields: [serviceStepId], references: [id])
+  name          String
+  price         Decimal     @db.Decimal(10, 2)
+}
+
+// Original global warranty list - kept for backward compatibility with
+// existing Service/ServiceType combinations that don't use the newer
+// per-Service-Type warranty system.
 model Warranty {
   id           String           @id @default(uuid())
   label        String           @unique // e.g. "6 Months", "1 Year", "Lifetime"
@@ -157,11 +224,11 @@ model Case {
   clinicId       String
   serviceId      String
   serviceTypeId  String
-  warrantyId     String
+  warrantyId     String?
   toothShadeId   String?
   toothNumbers   String[] // FDI two-digit codes, e.g. ["11","12","21"]
   comment        String?        @db.Text
-  pickedUpAt DateTime?
+  pickedUpAt     DateTime?
   photos         CasePhoto[]
   quantity       Int
   unitPrice      Decimal        @db.Decimal(10, 2)
@@ -170,17 +237,24 @@ model Case {
   paymentStatus  PaymentStatus  @default(UNPAID)
   createdById    String
 
+  serviceSubtypeId      String?
+  serviceSubtype        ServiceSubtype?      @relation(fields: [serviceSubtypeId], references: [id])
+  serviceTypeWarrantyId String?
+  serviceTypeWarranty   ServiceTypeWarranty? @relation(fields: [serviceTypeWarrantyId], references: [id])
+  caseSteps             CaseStep[]
+
   patient      Patient       @relation(fields: [patientId], references: [id])
   clinic       Clinic        @relation(fields: [clinicId], references: [id])
   service      Service       @relation(fields: [serviceId], references: [id])
   serviceType  ServiceType   @relation(fields: [serviceTypeId], references: [id])
-  warranty     Warranty      @relation(fields: [warrantyId], references: [id])
+  warranty     Warranty?     @relation(fields: [warrantyId], references: [id])
   toothShade   ToothShade?   @relation(fields: [toothShadeId], references: [id])
   transactions Transaction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
 model CasePhoto {
   id        String   @id @default(uuid())
   caseId    String
