@@ -46,13 +46,11 @@ async function computeOrderPricing({
   }
 
   if (serviceSubtypeId) {
-    const entry = await prisma.subtypePriceEntry.findUnique({
-      where: {
-        serviceSubtypeId_serviceTypeWarrantyId: {
-          serviceSubtypeId,
-          serviceTypeWarrantyId: serviceTypeWarrantyId || null,
-        },
-      },
+    // Same Prisma limitation as the admin pricing form - findFirst instead
+    // of findUnique, since the compound key doesn't accept null even though
+    // serviceTypeWarrantyId is an optional column (e.g. METAL, no warranty).
+    const entry = await prisma.subtypePriceEntry.findFirst({
+      where: { serviceSubtypeId, serviceTypeWarrantyId: serviceTypeWarrantyId || null },
     });
     if (!entry) {
       throw new Error("No price configured for this Service Type / Sub-Type / Warranty combination");

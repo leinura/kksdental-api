@@ -142,16 +142,18 @@ router.post("/subtype-price-list", async (req, res) => {
   if (!serviceSubtypeId || price == null) {
     return res.status(400).json({ error: "serviceSubtypeId and price are required" });
   }
-  const entry = await prisma.subtypePriceEntry.upsert({
-    where: {
-      serviceSubtypeId_serviceTypeWarrantyId: {
-        serviceSubtypeId,
-        serviceTypeWarrantyId: serviceTypeWarrantyId || null,
-      },
-    },
-    update: { price },
-    create: { serviceSubtypeId, serviceTypeWarrantyId: serviceTypeWarrantyId || null, price },
+  // Prisma's compound-unique upsert/findUnique doesn't accept null for an
+  // optional field in the key, even though the column itself is nullable -
+  // findFirst + manual create/update sidesteps that limitation.
+  const warrantyId = serviceTypeWarrantyId || null;
+  const existing = await prisma.subtypePriceEntry.findFirst({
+    where: { serviceSubtypeId, serviceTypeWarrantyId: warrantyId },
   });
+
+  const entry = existing
+    ? await prisma.subtypePriceEntry.update({ where: { id: existing.id }, data: { price } })
+    : await prisma.subtypePriceEntry.create({ data: { serviceSubtypeId, serviceTypeWarrantyId: warrantyId, price } });
+
   res.status(201).json(entry);
 });
 
