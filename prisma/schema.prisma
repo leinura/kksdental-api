@@ -37,6 +37,10 @@ enum TransactionMethod {
   CASH
   UPI
 }
+enum AdPlacement {
+  HERO
+  SHOP
+}
 
 // Every login (admin, lab staff, or dentist/clinic) is a User.
 // Dentist/clinic users have an attached Clinic profile with business details.
@@ -71,10 +75,11 @@ model Clinic {
 }
 
 model Advertisement {
-  id        String   @id @default(uuid())
-  imageData String   @db.Text
+  id        String      @id @default(uuid())
+  imageData String      @db.Text
   link      String?
-  createdAt DateTime @default(now())
+  placement AdPlacement @default(HERO)
+  createdAt DateTime    @default(now())
 }
 
 model Event {
