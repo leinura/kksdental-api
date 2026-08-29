@@ -21,6 +21,7 @@ enum DeliveryStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
+  RETURN_REPEAT
 }
 
 enum PaymentStatus {
