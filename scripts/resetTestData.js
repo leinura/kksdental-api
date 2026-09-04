@@ -7,7 +7,9 @@
 // Deletion order matters - children must go before the parents they
 // reference (foreign keys), so this walks the dependency tree from the
 // most-nested tables (CasePhoto, CaseStep) up to the root (Service,
-// Clinic, User).
+// Clinic, User). The whole thing runs as one transaction with an extended
+// timeout, since ~20 sequential deleteMany calls against a remote database
+// can easily exceed Prisma's 5-second default before finishing.
 
 const { PrismaClient } = require("@prisma/client");
 const readline = require("readline");
@@ -35,37 +37,40 @@ async function main() {
 
   console.log("\nWiping data...\n");
 
-  const result = await prisma.$transaction(async (tx) => {
-    const counts = {};
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const counts = {};
 
-    counts.casePhotos = (await tx.casePhoto.deleteMany()).count;
-    counts.caseSteps = (await tx.caseStep.deleteMany()).count;
-    counts.transactions = (await tx.transaction.deleteMany()).count;
-    counts.cases = (await tx.case.deleteMany()).count;
-    counts.patients = (await tx.patient.deleteMany()).count;
+      counts.casePhotos = (await tx.casePhoto.deleteMany()).count;
+      counts.caseSteps = (await tx.caseStep.deleteMany()).count;
+      counts.transactions = (await tx.transaction.deleteMany()).count;
+      counts.cases = (await tx.case.deleteMany()).count;
+      counts.patients = (await tx.patient.deleteMany()).count;
 
-    counts.subtypePriceEntries = (await tx.subtypePriceEntry.deleteMany()).count;
-    counts.serviceSteps = (await tx.serviceStep.deleteMany()).count;
-    counts.serviceSubtypes = (await tx.serviceSubtype.deleteMany()).count;
-    counts.serviceTypeWarranties = (await tx.serviceTypeWarranty.deleteMany()).count;
-    counts.priceListEntries = (await tx.priceListEntry.deleteMany()).count;
-    counts.serviceTypes = (await tx.serviceType.deleteMany()).count;
-    counts.services = (await tx.service.deleteMany()).count;
-    counts.warranties = (await tx.warranty.deleteMany()).count;
-    counts.toothShades = (await tx.toothShade.deleteMany()).count;
+      counts.subtypePriceEntries = (await tx.subtypePriceEntry.deleteMany()).count;
+      counts.serviceSteps = (await tx.serviceStep.deleteMany()).count;
+      counts.serviceSubtypes = (await tx.serviceSubtype.deleteMany()).count;
+      counts.serviceTypeWarranties = (await tx.serviceTypeWarranty.deleteMany()).count;
+      counts.priceListEntries = (await tx.priceListEntry.deleteMany()).count;
+      counts.serviceTypes = (await tx.serviceType.deleteMany()).count;
+      counts.services = (await tx.service.deleteMany()).count;
+      counts.warranties = (await tx.warranty.deleteMany()).count;
+      counts.toothShades = (await tx.toothShade.deleteMany()).count;
 
-    counts.notifications = (await tx.notification.deleteMany()).count;
-    counts.galleryPhotos = (await tx.galleryPhoto.deleteMany()).count;
-    counts.blogPosts = (await tx.blogPost.deleteMany()).count;
-    counts.advertisements = (await tx.advertisement.deleteMany()).count;
-    counts.events = (await tx.event.deleteMany()).count;
+      counts.notifications = (await tx.notification.deleteMany()).count;
+      counts.galleryPhotos = (await tx.galleryPhoto.deleteMany()).count;
+      counts.blogPosts = (await tx.blogPost.deleteMany()).count;
+      counts.advertisements = (await tx.advertisement.deleteMany()).count;
+      counts.events = (await tx.event.deleteMany()).count;
 
-    counts.loginActivities = (await tx.loginActivity.deleteMany()).count;
-    counts.clinics = (await tx.clinic.deleteMany()).count;
-    counts.nonAdminUsers = (await tx.user.deleteMany({ where: { role: { not: "ADMIN" } } })).count;
+      counts.loginActivities = (await tx.loginActivity.deleteMany()).count;
+      counts.clinics = (await tx.clinic.deleteMany()).count;
+      counts.nonAdminUsers = (await tx.user.deleteMany({ where: { role: { not: "ADMIN" } } })).count;
 
-    return counts;
-  });
+      return counts;
+    },
+    { timeout: 60000, maxWait: 10000 } // 60s to run, up to 10s to even acquire the transaction
+  );
 
   console.log("Done. Rows deleted:");
   console.table(result);
