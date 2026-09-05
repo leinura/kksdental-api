@@ -43,7 +43,7 @@ app.get("/privacy-policy", (req, res) => {
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="updated">Last updated: September 4, 2026</p>
+  <p class="updated">Last updated: [DATE]</p>
 
   <p>
     KKSDENTAL Lab ("we", "us", "the app") provides a dental lab management platform used by
@@ -130,7 +130,72 @@ app.get("/privacy-policy", (req, res) => {
 
   <h2>Contact us</h2>
   <p>
-    Questions about this policy or your data can be sent to: <strong>kksdentallab@gmail.com</strong>
+    Questions about this policy or your data can be sent to: <strong>[SUPPORT EMAIL]</strong>
+  </p>
+</body>
+</html>`);
+});
+
+// Public account deletion instructions - required by Google Play whenever
+// an app has user accounts, even ones created by an admin rather than
+// self-registered. Separate from the privacy policy page since Google
+// specifically wants deletion steps to be prominent on their own.
+app.get("/delete-account", (req, res) => {
+  res.set("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete Your Account - KKSDENTAL Lab</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 32px 20px 80px; color: #1a1a1a; line-height: 1.6; }
+    h1 { font-size: 26px; margin-bottom: 24px; }
+    h2 { font-size: 18px; margin-top: 32px; }
+    p, li { font-size: 15px; color: #2a2a2a; }
+    ol, ul { padding-left: 22px; }
+    .step { background: #f7f7f7; border-radius: 10px; padding: 16px 20px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>Delete Your KKSDENTAL Lab Account</h1>
+
+  <p>
+    KKSDENTAL Lab accounts (admin, lab staff, and clinic/dentist accounts) are created directly
+    by KKSDENTAL Lab rather than through self-registration in the app. To keep account deletion
+    simple and secure, requests are handled directly by our team rather than as an automated
+    in-app action.
+  </p>
+
+  <h2>How to request deletion</h2>
+  <div class="step">
+    <ol>
+      <li>Email <strong>[SUPPORT EMAIL]</strong> from the email address associated with your account, or
+        include your username and clinic name in the message.</li>
+      <li>State that you want your account and associated data deleted.</li>
+      <li>We will confirm your identity and process the request within a reasonable time, and
+        will follow up once it's complete.</li>
+    </ol>
+  </div>
+
+  <h2>What gets deleted</h2>
+  <ul>
+    <li>Your login credentials (username, password, email) are permanently deleted.</li>
+    <li>Your access to the app is immediately revoked.</li>
+  </ul>
+
+  <h2>What may be retained, and why</h2>
+  <ul>
+    <li>Patient records and order history tied to a clinic account may be retained for standard
+      business record-keeping (such as invoicing history and warranty tracking on completed lab
+      work), even after the associated login is deleted.</li>
+    <li>If you would like these records fully erased as well rather than retained, state this
+      explicitly in your deletion request, and we will accommodate it unless we're required to
+      keep certain records for legal or accounting purposes.</li>
+  </ul>
+
+  <p>
+    Questions about this process can be sent to <strong>[SUPPORT EMAIL]</strong>.
   </p>
 </body>
 </html>`);
