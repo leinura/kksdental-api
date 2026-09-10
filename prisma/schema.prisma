@@ -84,13 +84,22 @@ model Advertisement {
 }
 
 model Event {
-  id          String   @id @default(uuid())
+  id          String       @id @default(uuid())
   title       String
-  description String?  @db.Text
-  imageData   String?  @db.Text
+  description String?      @db.Text
+  imageData   String?      @db.Text
   link        String?
   phone       String?
-  createdAt   DateTime @default(now())
+  photos      EventPhoto[]
+  createdAt   DateTime     @default(now())
+}
+
+model EventPhoto {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  imageData String   @db.Text
+  createdAt DateTime @default(now())
 }
 
 model Patient {
