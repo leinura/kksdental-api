@@ -10,8 +10,8 @@ const prisma = new PrismaClient();
 router.use(requireAuth);
 
 // Deeply nested: each ServiceType now carries its own Sub-Types (with their
-// prices), its own Service-Type-scoped Warranties, and its own Steps (for
-// usesSteps ServiceTypes) - everything the order form needs in one call.
+// prices), its own Service-Type-scoped Warranties, its own Steps, and its
+// own Add-ons - everything the order form needs in one call.
 router.get("/services", async (req, res) => {
   const services = await prisma.service.findMany({
     include: {
@@ -20,6 +20,7 @@ router.get("/services", async (req, res) => {
           subtypes: { include: { priceEntries: true } },
           typeWarranties: true,
           steps: true,
+          addons: true,
         },
       },
     },
@@ -57,15 +58,23 @@ router.post("/service-types", async (req, res) => {
   res.status(201).json(serviceType);
 });
 
-// PUT /api/catalog/service-types/:id - toggle whether this Service Type
-// uses step-based pricing (Complete Denture style) instead of the
-// Sub-Type/Warranty or legacy Warranty pricing.
+// PUT /api/catalog/service-types/:id - toggles how this Service Type is
+// priced (usesSteps, usesTieredPricing) and how its quantity is determined
+// (usesFdiNumbering vs usesArch) - independent settings, see priceLookup.js
+// for exactly how they interact. tieredBasePrice/tieredIncrementPrice only
+// matter when usesTieredPricing is true.
 router.put("/service-types/:id", async (req, res) => {
-  const { name, usesSteps } = req.body;
+  const { name, usesSteps, usesFdiNumbering, usesArch, usesTieredPricing, tieredBasePrice, tieredIncrementPrice } =
+    req.body;
   try {
     const data = {};
     if (name !== undefined) data.name = name;
     if (usesSteps !== undefined) data.usesSteps = usesSteps;
+    if (usesFdiNumbering !== undefined) data.usesFdiNumbering = usesFdiNumbering;
+    if (usesArch !== undefined) data.usesArch = usesArch;
+    if (usesTieredPricing !== undefined) data.usesTieredPricing = usesTieredPricing;
+    if (tieredBasePrice !== undefined) data.tieredBasePrice = tieredBasePrice;
+    if (tieredIncrementPrice !== undefined) data.tieredIncrementPrice = tieredIncrementPrice;
     const serviceType = await prisma.serviceType.update({ where: { id: req.params.id }, data });
     res.json(serviceType);
   } catch (err) {
@@ -163,22 +172,25 @@ router.delete("/subtype-price-list/:id", async (req, res) => {
 });
 
 // --- Steps (e.g. "Special Tray", "Teeth Setting per Arch" under Complete Denture) ---
+// perArch: when true, this step's price multiplies by how many arches were
+// selected (1 or 2) on the order; when false, it's charged once regardless.
 
 router.post("/service-steps", async (req, res) => {
-  const { name, price, serviceTypeId } = req.body;
+  const { name, price, serviceTypeId, perArch } = req.body;
   if (!name || price == null || !serviceTypeId) {
     return res.status(400).json({ error: "name, price, and serviceTypeId are required" });
   }
-  const step = await prisma.serviceStep.create({ data: { name, price, serviceTypeId } });
+  const step = await prisma.serviceStep.create({ data: { name, price, serviceTypeId, perArch: !!perArch } });
   res.status(201).json(step);
 });
 
 router.put("/service-steps/:id", async (req, res) => {
-  const { name, price } = req.body;
+  const { name, price, perArch } = req.body;
   try {
     const data = {};
     if (name !== undefined) data.name = name;
     if (price !== undefined) data.price = price;
+    if (perArch !== undefined) data.perArch = perArch;
     const step = await prisma.serviceStep.update({ where: { id: req.params.id }, data });
     res.json(step);
   } catch (err) {
@@ -192,6 +204,41 @@ router.delete("/service-steps/:id", async (req, res) => {
     res.json({ message: "Step deleted" });
   } catch (err) {
     res.status(400).json({ error: "Can't delete - this step has cases linked to it" });
+  }
+});
+
+// --- Add-ons (e.g. "Zirconia crown with gingival extension +200/crown") ---
+// General-purpose checkbox extras, attached to a Service Type, priced per
+// unit of whatever that Service Type's quantity turns out to be.
+
+router.post("/service-addons", async (req, res) => {
+  const { name, price, serviceTypeId } = req.body;
+  if (!name || price == null || !serviceTypeId) {
+    return res.status(400).json({ error: "name, price, and serviceTypeId are required" });
+  }
+  const addon = await prisma.serviceAddon.create({ data: { name, price, serviceTypeId } });
+  res.status(201).json(addon);
+});
+
+router.put("/service-addons/:id", async (req, res) => {
+  const { name, price } = req.body;
+  try {
+    const data = {};
+    if (name !== undefined) data.name = name;
+    if (price !== undefined) data.price = price;
+    const addon = await prisma.serviceAddon.update({ where: { id: req.params.id }, data });
+    res.json(addon);
+  } catch (err) {
+    res.status(404).json({ error: "Add-on not found" });
+  }
+});
+
+router.delete("/service-addons/:id", async (req, res) => {
+  try {
+    await prisma.serviceAddon.delete({ where: { id: req.params.id } });
+    res.json({ message: "Add-on deleted" });
+  } catch (err) {
+    res.status(400).json({ error: "Can't delete - this add-on has cases linked to it" });
   }
 });
 

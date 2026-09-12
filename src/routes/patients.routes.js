@@ -12,7 +12,7 @@ router.use(requireAuth);
 
 // POST /api/patients/register - Patient Registration screen (new patients only)
 // Dentist only. Creates the Patient profile and their first Case together.
-// Supports the same three pricing paths as Billing (see priceLookup.js).
+// Supports the same pricing paths as Billing (see priceLookup.js).
 router.post("/register", requireRole("DENTIST"), async (req, res) => {
   const {
     fullName,
@@ -24,9 +24,12 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
     serviceSubtypeId,
     serviceTypeWarrantyId,
     stepIds,
+    addonIds,
     toothShadeId,
     toothNumbers, // array of FDI codes, e.g. ["11","12"]
     quantity, // optional - defaults to toothNumbers.length
+    archUpper,
+    archLower,
     comment, // optional free-text note from the clinic
     photos, // optional array of base64 data-URI strings
   } = req.body;
@@ -55,8 +58,11 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
       serviceSubtypeId,
       serviceTypeWarrantyId,
       stepIds,
+      addonIds,
       quantity,
       toothNumbers,
+      archUpper,
+      archLower,
     });
 
     const patientCode = await generatePatientCode();
@@ -85,6 +91,8 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
           serviceTypeWarrantyId: serviceTypeWarrantyId || null,
           toothShadeId: toothShadeId || null,
           toothNumbers: toothNumbers || [],
+          archUpper: !!archUpper,
+          archLower: !!archLower,
           comment: comment || null,
           quantity: pricing.quantity,
           unitPrice: pricing.unitPrice,
@@ -100,6 +108,17 @@ router.post("/register", requireRole("DENTIST"), async (req, res) => {
             serviceStepId: s.serviceStepId,
             name: s.name,
             price: s.price,
+          })),
+        });
+      }
+
+      if (pricing.resolvedAddons.length > 0) {
+        await tx.caseAddon.createMany({
+          data: pricing.resolvedAddons.map((a) => ({
+            caseId: newCase.id,
+            serviceAddonId: a.serviceAddonId,
+            name: a.name,
+            price: a.price,
           })),
         });
       }

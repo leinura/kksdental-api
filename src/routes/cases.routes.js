@@ -11,8 +11,10 @@ const prisma = new PrismaClient();
 router.use(requireAuth);
 
 // POST /api/cases - Billing screen: new order for an already-registered patient.
-// Supports three pricing paths (see priceLookup.js) - the frontend sends
-// whichever fields match the chosen Service Type's configuration.
+// Supports all pricing paths (see priceLookup.js) - the frontend sends
+// whichever fields match the chosen Service Type's configuration (FDI
+// tooth numbers vs. Upper/Lower arch checkboxes, steps, tiered pricing,
+// sub-type+warranty, or the legacy system, plus optional add-ons).
 router.post("/", requireRole("DENTIST"), async (req, res) => {
   const {
     patientId,
@@ -22,9 +24,12 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
     serviceSubtypeId,
     serviceTypeWarrantyId,
     stepIds,
+    addonIds,
     toothShadeId,
     toothNumbers,
     quantity,
+    archUpper,
+    archLower,
     comment,
     photos,
   } = req.body;
@@ -46,8 +51,11 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
       serviceSubtypeId,
       serviceTypeWarrantyId,
       stepIds,
+      addonIds,
       quantity,
       toothNumbers,
+      archUpper,
+      archLower,
     });
     const caseCode = await generateCaseCode();
 
@@ -64,6 +72,8 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
           serviceTypeWarrantyId: serviceTypeWarrantyId || null,
           toothShadeId: toothShadeId || null,
           toothNumbers: toothNumbers || [],
+          archUpper: !!archUpper,
+          archLower: !!archLower,
           comment: comment || null,
           quantity: pricing.quantity,
           unitPrice: pricing.unitPrice,
@@ -79,6 +89,17 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
             serviceStepId: s.serviceStepId,
             name: s.name,
             price: s.price,
+          })),
+        });
+      }
+
+      if (pricing.resolvedAddons.length > 0) {
+        await tx.caseAddon.createMany({
+          data: pricing.resolvedAddons.map((a) => ({
+            caseId: createdCase.id,
+            serviceAddonId: a.serviceAddonId,
+            name: a.name,
+            price: a.price,
           })),
         });
       }
@@ -137,8 +158,8 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/cases/:id - full single-order detail, including uploaded patient
-// photos, and now the Sub-Type / Service-Type-Warranty / step breakdown
-// when the order used the newer pricing paths.
+// photos, the Sub-Type / Service-Type-Warranty / step / add-on breakdown,
+// and arch selection when the order used those newer pricing paths.
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -154,6 +175,7 @@ router.get("/:id", async (req, res) => {
       serviceSubtype: true,
       serviceTypeWarranty: true,
       caseSteps: true,
+      caseAddons: true,
       transactions: { orderBy: { createdAt: "desc" } },
       photos: { orderBy: { createdAt: "asc" } },
     },

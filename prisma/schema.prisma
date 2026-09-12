@@ -132,6 +132,11 @@ model ServiceType {
   id             String                @id @default(uuid())
   name           String
   usesSteps      Boolean               @default(false)
+  usesFdiNumbering Boolean             @default(true)
+  usesArch       Boolean               @default(false)
+  usesTieredPricing Boolean            @default(false)
+  tieredBasePrice      Decimal?        @db.Decimal(10, 2)
+  tieredIncrementPrice Decimal?        @db.Decimal(10, 2)
   serviceId      String
   service        Service               @relation(fields: [serviceId], references: [id])
   priceEntries   PriceListEntry[]
@@ -139,8 +144,8 @@ model ServiceType {
   subtypes       ServiceSubtype[]
   typeWarranties ServiceTypeWarranty[]
   steps          ServiceStep[]
+  addons         ServiceAddon[]
 }
-
 // Sits under a ServiceType (e.g. "Premium Zirconia" under "ALL CERAMIC")
 model ServiceSubtype {
   id            String              @id @default(uuid())
@@ -184,11 +189,30 @@ model ServiceStep {
   id            String      @id @default(uuid())
   name          String
   price         Decimal     @db.Decimal(10, 2)
+  perArch       Boolean     @default(false)
   serviceTypeId String
   serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id])
   caseSteps     CaseStep[]
 }
 
+model ServiceAddon {
+  id            String      @id @default(uuid())
+  name          String
+  price         Decimal     @db.Decimal(10, 2)
+  serviceTypeId String
+  serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id])
+  caseAddons    CaseAddon[]
+}
+
+model CaseAddon {
+  id             String       @id @default(uuid())
+  caseId         String
+  case           Case         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  serviceAddonId String
+  serviceAddon   ServiceAddon @relation(fields: [serviceAddonId], references: [id])
+  name           String
+  price          Decimal      @db.Decimal(10, 2)
+}
 // Records which steps were picked for a specific order, with price
 // snapshotted at order time (so later price changes don't rewrite history).
 model CaseStep {
@@ -257,6 +281,9 @@ model Case {
   serviceTypeWarrantyId String?
   serviceTypeWarranty   ServiceTypeWarranty? @relation(fields: [serviceTypeWarrantyId], references: [id])
   caseSteps             CaseStep[]
+  archUpper Boolean @default(false)
+  archLower Boolean @default(false)
+  caseAddons CaseAddon[]
 
   patient      Patient       @relation(fields: [patientId], references: [id])
   clinic       Clinic        @relation(fields: [clinicId], references: [id])
