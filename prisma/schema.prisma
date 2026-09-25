@@ -147,6 +147,7 @@ model ServiceType {
   addons         ServiceAddon[]
   tieredIncludedUnits Int @default(1)
   description String?
+  allowsChildrenTeeth Boolean @default(false)
 }
 // Sits under a ServiceType (e.g. "Premium Zirconia" under "ALL CERAMIC")
 model ServiceSubtype {
