@@ -146,6 +146,7 @@ model ServiceType {
   steps          ServiceStep[]
   addons         ServiceAddon[]
   tieredIncludedUnits Int @default(1)
+  description String?
 }
 // Sits under a ServiceType (e.g. "Premium Zirconia" under "ALL CERAMIC")
 model ServiceSubtype {

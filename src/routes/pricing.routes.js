@@ -68,6 +68,7 @@ router.post("/service-types", async (req, res) => {
 router.put("/service-types/:id", async (req, res) => {
   const {
     name,
+    description,
     usesSteps,
     usesFdiNumbering,
     usesArch,
@@ -79,6 +80,7 @@ router.put("/service-types/:id", async (req, res) => {
   try {
     const data = {};
     if (name !== undefined) data.name = name;
+    if (description !== undefined) data.description = description;
     if (usesSteps !== undefined) data.usesSteps = usesSteps;
     if (usesFdiNumbering !== undefined) data.usesFdiNumbering = usesFdiNumbering;
     if (usesArch !== undefined) data.usesArch = usesArch;
