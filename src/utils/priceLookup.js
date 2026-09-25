@@ -90,6 +90,11 @@ async function computeOrderPricing({
     }
     const base = Number(serviceType.tieredBasePrice);
     const increment = Number(serviceType.tieredIncrementPrice);
+    // How many units the base price flatly covers before the increment
+    // kicks in - defaults to 1 (RPD: base covers just the first tooth).
+    // Flexible RPD sets this to 3 (base covers up to 3 teeth flat, +200
+    // for each tooth beyond that).
+    const includedUnits = serviceType.tieredIncludedUnits ?? 1;
 
     if (serviceType.usesFdiNumbering && Array.isArray(toothNumbers) && toothNumbers.length > 0) {
       // The base price applies ONCE PER ARCH that has any teeth selected,
@@ -101,10 +106,10 @@ async function computeOrderPricing({
       const upperCount = toothNumbers.filter((t) => ["1", "2", "5", "6"].includes(t.charAt(0))).length;
       const lowerCount = toothNumbers.filter((t) => ["3", "4", "7", "8"].includes(t.charAt(0))).length;
       totalPrice = 0;
-      if (upperCount > 0) totalPrice += base + Math.max(0, upperCount - 1) * increment;
-      if (lowerCount > 0) totalPrice += base + Math.max(0, lowerCount - 1) * increment;
+      if (upperCount > 0) totalPrice += base + Math.max(0, upperCount - includedUnits) * increment;
+      if (lowerCount > 0) totalPrice += base + Math.max(0, lowerCount - includedUnits) * increment;
     } else {
-      totalPrice = base + Math.max(0, finalQuantity - 1) * increment;
+      totalPrice = base + Math.max(0, finalQuantity - includedUnits) * increment;
     }
     unitPrice = totalPrice;
   } else if (serviceSubtypeId) {

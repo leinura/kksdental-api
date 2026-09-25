@@ -61,11 +61,21 @@ router.post("/service-types", async (req, res) => {
 // PUT /api/catalog/service-types/:id - toggles how this Service Type is
 // priced (usesSteps, usesTieredPricing) and how its quantity is determined
 // (usesFdiNumbering vs usesArch) - independent settings, see priceLookup.js
-// for exactly how they interact. tieredBasePrice/tieredIncrementPrice only
-// matter when usesTieredPricing is true.
+// for exactly how they interact. tieredBasePrice/tieredIncrementPrice/
+// tieredIncludedUnits only matter when usesTieredPricing is true -
+// tieredIncludedUnits is how many units the base price flatly covers
+// before the increment kicks in (RPD: 1, Flexible RPD: 3).
 router.put("/service-types/:id", async (req, res) => {
-  const { name, usesSteps, usesFdiNumbering, usesArch, usesTieredPricing, tieredBasePrice, tieredIncrementPrice } =
-    req.body;
+  const {
+    name,
+    usesSteps,
+    usesFdiNumbering,
+    usesArch,
+    usesTieredPricing,
+    tieredBasePrice,
+    tieredIncrementPrice,
+    tieredIncludedUnits,
+  } = req.body;
   try {
     const data = {};
     if (name !== undefined) data.name = name;
@@ -75,6 +85,7 @@ router.put("/service-types/:id", async (req, res) => {
     if (usesTieredPricing !== undefined) data.usesTieredPricing = usesTieredPricing;
     if (tieredBasePrice !== undefined) data.tieredBasePrice = tieredBasePrice;
     if (tieredIncrementPrice !== undefined) data.tieredIncrementPrice = tieredIncrementPrice;
+    if (tieredIncludedUnits !== undefined) data.tieredIncludedUnits = tieredIncludedUnits;
     const serviceType = await prisma.serviceType.update({ where: { id: req.params.id }, data });
     res.json(serviceType);
   } catch (err) {
