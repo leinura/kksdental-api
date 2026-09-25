@@ -90,7 +90,22 @@ async function computeOrderPricing({
     }
     const base = Number(serviceType.tieredBasePrice);
     const increment = Number(serviceType.tieredIncrementPrice);
-    totalPrice = base + Math.max(0, finalQuantity - 1) * increment;
+
+    if (serviceType.usesFdiNumbering && Array.isArray(toothNumbers) && toothNumbers.length > 0) {
+      // The base price applies ONCE PER ARCH that has any teeth selected,
+      // not once per order overall - e.g. Removable Partial Denture: ₹350
+      // covers the first tooth on the upper arch AND separately covers the
+      // first tooth on the lower arch, with +₹50 per additional tooth
+      // within each arch. FDI quadrants: 1/2 (and primary 5/6) = upper,
+      // 3/4 (and primary 7/8) = lower.
+      const upperCount = toothNumbers.filter((t) => ["1", "2", "5", "6"].includes(t.charAt(0))).length;
+      const lowerCount = toothNumbers.filter((t) => ["3", "4", "7", "8"].includes(t.charAt(0))).length;
+      totalPrice = 0;
+      if (upperCount > 0) totalPrice += base + Math.max(0, upperCount - 1) * increment;
+      if (lowerCount > 0) totalPrice += base + Math.max(0, lowerCount - 1) * increment;
+    } else {
+      totalPrice = base + Math.max(0, finalQuantity - 1) * increment;
+    }
     unitPrice = totalPrice;
   } else if (serviceSubtypeId) {
     // findFirst, not findUnique - Prisma's compound-unique lookup doesn't
