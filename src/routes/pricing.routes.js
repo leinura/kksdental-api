@@ -1,301 +1,203 @@
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { generatePatientCode, generateCaseCode } = require("../utils/codeGenerator");
+const { notifyAdmins } = require("../utils/notifyAdmins");
+const { computeOrderPricing } = require("../utils/priceLookup");
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// GET routes are open to any logged-in user, since dentists need these
-// lists to populate the Patient Registration / Billing dropdowns.
 router.use(requireAuth);
 
-// Deeply nested: each ServiceType now carries its own Sub-Types (with their
-// prices), its own Service-Type-scoped Warranties, its own Steps, and its
-// own Add-ons - everything the order form needs in one call.
-router.get("/services", async (req, res) => {
-  const services = await prisma.service.findMany({
-    include: {
-      serviceTypes: {
-        include: {
-          subtypes: { include: { priceEntries: true } },
-          typeWarranties: true,
-          steps: true,
-          addons: true,
-        },
+// POST /api/patients/register - Patient Registration screen (new patients only)
+// Dentist only. Creates the Patient profile and their first Case together.
+// Supports the same pricing paths as Billing (see priceLookup.js).
+// serviceId/serviceTypeId are optional - see cases.routes.js for the full
+// explanation of custom (off-catalog, phone-discussed) requests.
+router.post("/register", requireRole("DENTIST"), async (req, res) => {
+  const {
+    fullName,
+    gender,
+    age,
+    serviceId,
+    serviceTypeId,
+    warrantyId,
+    serviceSubtypeId,
+    serviceTypeWarrantyId,
+    stepIds,
+    addonIds,
+    toothShadeId,
+    toothNumbers, // array of FDI codes, e.g. ["11","12"]
+    quantity, // optional - defaults to toothNumbers.length
+    archUpper,
+    archLower,
+    comment, // optional free-text note from the clinic
+    customRequestNote, // optional - off-catalog request, price set later by admin
+    photos, // optional array of base64 data-URI strings
+  } = req.body;
+
+  if (!fullName || !gender || !age) {
+    return res.status(400).json({ error: "Missing required patient or case fields" });
+  }
+  if ((!serviceId || !serviceTypeId) && !customRequestNote?.trim()) {
+    return res
+      .status(400)
+      .json({ error: "Select a Service and Service Type, or describe the request in the custom note field" });
+  }
+
+  try {
+    const existing = await prisma.patient.findFirst({
+      where: {
+        clinicId: req.user.clinicId,
+        fullName: { equals: fullName, mode: "insensitive" },
       },
+    });
+    if (existing) {
+      return res.status(409).json({
+        error: `A patient named "${existing.fullName}" is already registered (ID: ${existing.patientCode}). Use Billing to search for and select the existing patient instead of registering them again.`,
+      });
+    }
+
+    const pricing = await computeOrderPricing({
+      serviceId,
+      serviceTypeId,
+      warrantyId,
+      serviceSubtypeId,
+      serviceTypeWarrantyId,
+      stepIds,
+      addonIds,
+      quantity,
+      toothNumbers,
+      archUpper,
+      archLower,
+    });
+
+    const patientCode = await generatePatientCode();
+    const caseCode = await generateCaseCode();
+
+    const result = await prisma.$transaction(async (tx) => {
+      const patient = await tx.patient.create({
+        data: {
+          patientCode,
+          fullName,
+          gender,
+          age: Number(age),
+          clinicId: req.user.clinicId,
+        },
+      });
+
+      const newCase = await tx.case.create({
+        data: {
+          caseCode,
+          patientId: patient.id,
+          clinicId: req.user.clinicId,
+          serviceId: serviceId || null,
+          serviceTypeId: serviceTypeId || null,
+          warrantyId: warrantyId || null,
+          serviceSubtypeId: serviceSubtypeId || null,
+          serviceTypeWarrantyId: serviceTypeWarrantyId || null,
+          toothShadeId: toothShadeId || null,
+          toothNumbers: toothNumbers || [],
+          archUpper: !!archUpper,
+          archLower: !!archLower,
+          comment: comment || null,
+          customRequestNote: customRequestNote?.trim() || null,
+          quantity: pricing.quantity,
+          unitPrice: pricing.unitPrice,
+          totalPrice: pricing.totalPrice,
+          createdById: req.user.id,
+        },
+      });
+
+      if (pricing.resolvedSteps.length > 0) {
+        await tx.caseStep.createMany({
+          data: pricing.resolvedSteps.map((s) => ({
+            caseId: newCase.id,
+            serviceStepId: s.serviceStepId,
+            name: s.name,
+            price: s.price,
+          })),
+        });
+      }
+
+      if (pricing.resolvedAddons.length > 0) {
+        await tx.caseAddon.createMany({
+          data: pricing.resolvedAddons.map((a) => ({
+            caseId: newCase.id,
+            serviceAddonId: a.serviceAddonId,
+            name: a.name,
+            price: a.price,
+          })),
+        });
+      }
+
+      if (Array.isArray(photos) && photos.length > 0) {
+        await tx.casePhoto.createMany({
+          data: photos.map((imageData) => ({ caseId: newCase.id, imageData })),
+        });
+      }
+
+      return { patient, case: newCase };
+    });
+
+    const clinic = await prisma.clinic.findUnique({ where: { id: req.user.clinicId }, select: { name: true } });
+    const regCode = `REG-${result.patient.patientCode.replace(/^PT-/, "")}`;
+    notifyAdmins({
+      type: "NEW_ORDER",
+      message: `New patient registered from clinic ${clinic?.name || "Unknown"}: ${result.patient.fullName} (${regCode})`,
+      caseId: result.case.id,
+    });
+
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("Patient registration error:", err);
+    res.status(400).json({ error: err.message || "Failed to register patient" });
+  }
+});
+
+// GET /api/patients - Patient List (scoped to the logged-in clinic)
+router.get("/", requireRole("DENTIST"), async (req, res) => {
+  const patients = await prisma.patient.findMany({
+    where: { clinicId: req.user.clinicId },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json(patients);
+});
+
+// GET /api/patients/search?query=... - used by Billing's "existing patient" search
+// Matches on Patient ID or Patient Name, scoped to the logged-in clinic.
+router.get("/search", requireRole("DENTIST"), async (req, res) => {
+  const { query } = req.query;
+  if (!query) return res.status(400).json({ error: "Provide a Patient ID or Patient Name to search" });
+
+  const patients = await prisma.patient.findMany({
+    where: {
+      clinicId: req.user.clinicId,
+      OR: [
+        { patientCode: { contains: query, mode: "insensitive" } },
+        { fullName: { contains: query, mode: "insensitive" } },
+      ],
     },
   });
-  res.json(services);
+  res.json(patients);
 });
 
-router.get("/warranties", async (req, res) => {
-  res.json(await prisma.warranty.findMany());
-});
-
-router.get("/tooth-shades", async (req, res) => {
-  res.json(await prisma.toothShade.findMany());
-});
-
-router.get("/price-list", async (req, res) => {
-  res.json(
-    await prisma.priceListEntry.findMany({
-      include: { service: true, serviceType: true, warranty: true },
-    })
-  );
-});
-
-// Everything below is admin-only catalog management.
-router.use(requireRole("ADMIN"));
-
-router.post("/services", async (req, res) => {
-  const service = await prisma.service.create({ data: { name: req.body.name } });
-  res.status(201).json(service);
-});
-
-router.post("/service-types", async (req, res) => {
-  const { name, serviceId } = req.body;
-  const serviceType = await prisma.serviceType.create({ data: { name, serviceId } });
-  res.status(201).json(serviceType);
-});
-
-// PUT /api/catalog/service-types/:id - toggles how this Service Type is
-// priced (usesSteps, usesTieredPricing) and how its quantity is determined
-// (usesFdiNumbering vs usesArch) - independent settings, see priceLookup.js
-// for exactly how they interact. tieredBasePrice/tieredIncrementPrice/
-// tieredIncludedUnits only matter when usesTieredPricing is true -
-// tieredIncludedUnits is how many units the base price flatly covers
-// before the increment kicks in (RPD: 1, Flexible RPD: 3).
-router.put("/service-types/:id", async (req, res) => {
-  const {
-    name,
-    description,
-    usesSteps,
-    usesFdiNumbering,
-    usesArch,
-    usesTieredPricing,
-    tieredBasePrice,
-    tieredIncrementPrice,
-    tieredIncludedUnits,
-  } = req.body;
-  try {
-    const data = {};
-    if (name !== undefined) data.name = name;
-    if (description !== undefined) data.description = description;
-    if (usesSteps !== undefined) data.usesSteps = usesSteps;
-    if (usesFdiNumbering !== undefined) data.usesFdiNumbering = usesFdiNumbering;
-    if (usesArch !== undefined) data.usesArch = usesArch;
-    if (usesTieredPricing !== undefined) data.usesTieredPricing = usesTieredPricing;
-    if (tieredBasePrice !== undefined) data.tieredBasePrice = tieredBasePrice;
-    if (tieredIncrementPrice !== undefined) data.tieredIncrementPrice = tieredIncrementPrice;
-    if (tieredIncludedUnits !== undefined) data.tieredIncludedUnits = tieredIncludedUnits;
-    const serviceType = await prisma.serviceType.update({ where: { id: req.params.id }, data });
-    res.json(serviceType);
-  } catch (err) {
-    res.status(404).json({ error: "Service type not found" });
-  }
-});
-
-router.post("/warranties", async (req, res) => {
-  const warranty = await prisma.warranty.create({ data: { label: req.body.label } });
-  res.status(201).json(warranty);
-});
-
-router.post("/tooth-shades", async (req, res) => {
-  const shade = await prisma.toothShade.create({ data: { code: req.body.code } });
-  res.status(201).json(shade);
-});
-
-router.post("/price-list", async (req, res) => {
-  const { serviceId, serviceTypeId, warrantyId, price } = req.body;
-  const entry = await prisma.priceListEntry.upsert({
-    where: { serviceId_serviceTypeId_warrantyId: { serviceId, serviceTypeId, warrantyId } },
-    update: { price },
-    create: { serviceId, serviceTypeId, warrantyId, price },
+// GET /api/patients/:id - Patient detail (the "Details" link on Patient List)
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+  const patient = await prisma.patient.findUnique({
+    where: { id },
+    include: { cases: { orderBy: { createdAt: "desc" } } },
   });
-  res.status(201).json(entry);
-});
+  if (!patient) return res.status(404).json({ error: "Patient not found" });
 
-// --- Sub-Types (e.g. "Premium Zirconia" under Crown > ALL CERAMIC) ---
-
-router.post("/service-subtypes", async (req, res) => {
-  const { name, serviceTypeId } = req.body;
-  if (!name || !serviceTypeId) {
-    return res.status(400).json({ error: "name and serviceTypeId are required" });
+  // Dentists can only view their own clinic's patients.
+  if (req.user.role === "DENTIST" && patient.clinicId !== req.user.clinicId) {
+    return res.status(403).json({ error: "You don't have access to this patient" });
   }
-  const subtype = await prisma.serviceSubtype.create({ data: { name, serviceTypeId } });
-  res.status(201).json(subtype);
-});
 
-router.delete("/service-subtypes/:id", async (req, res) => {
-  try {
-    await prisma.serviceSubtype.delete({ where: { id: req.params.id } });
-    res.json({ message: "Sub-type deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this sub-type has prices or cases linked to it" });
-  }
-});
-
-// --- Service-Type-scoped Warranties (e.g. ALL CERAMIC's own 5/10/15 Year options) ---
-
-router.post("/service-type-warranties", async (req, res) => {
-  const { label, serviceTypeId } = req.body;
-  if (!label || !serviceTypeId) {
-    return res.status(400).json({ error: "label and serviceTypeId are required" });
-  }
-  const warranty = await prisma.serviceTypeWarranty.create({ data: { label, serviceTypeId } });
-  res.status(201).json(warranty);
-});
-
-router.delete("/service-type-warranties/:id", async (req, res) => {
-  try {
-    await prisma.serviceTypeWarranty.delete({ where: { id: req.params.id } });
-    res.json({ message: "Warranty deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this warranty has prices or cases linked to it" });
-  }
-});
-
-// --- Sub-Type x Warranty prices ---
-// serviceTypeWarrantyId may be omitted/null for Service Types with no
-// warranty at all (like METAL) - price is then keyed on Sub-Type alone.
-
-router.post("/subtype-price-list", async (req, res) => {
-  const { serviceSubtypeId, serviceTypeWarrantyId, price } = req.body;
-  if (!serviceSubtypeId || price == null) {
-    return res.status(400).json({ error: "serviceSubtypeId and price are required" });
-  }
-  // Prisma's compound-unique upsert/findUnique doesn't accept null for an
-  // optional field in the key, even though the column itself is nullable -
-  // findFirst + manual create/update sidesteps that limitation.
-  const warrantyId = serviceTypeWarrantyId || null;
-  const existing = await prisma.subtypePriceEntry.findFirst({
-    where: { serviceSubtypeId, serviceTypeWarrantyId: warrantyId },
-  });
-
-  const entry = existing
-    ? await prisma.subtypePriceEntry.update({ where: { id: existing.id }, data: { price } })
-    : await prisma.subtypePriceEntry.create({ data: { serviceSubtypeId, serviceTypeWarrantyId: warrantyId, price } });
-
-  res.status(201).json(entry);
-});
-
-router.delete("/subtype-price-list/:id", async (req, res) => {
-  await prisma.subtypePriceEntry.delete({ where: { id: req.params.id } });
-  res.json({ message: "Price entry deleted" });
-});
-
-// --- Steps (e.g. "Special Tray", "Teeth Setting per Arch" under Complete Denture) ---
-// perArch: when true, this step's price multiplies by how many arches were
-// selected (1 or 2) on the order; when false, it's charged once regardless.
-
-router.post("/service-steps", async (req, res) => {
-  const { name, price, serviceTypeId, perArch } = req.body;
-  if (!name || price == null || !serviceTypeId) {
-    return res.status(400).json({ error: "name, price, and serviceTypeId are required" });
-  }
-  const step = await prisma.serviceStep.create({ data: { name, price, serviceTypeId, perArch: !!perArch } });
-  res.status(201).json(step);
-});
-
-router.put("/service-steps/:id", async (req, res) => {
-  const { name, price, perArch } = req.body;
-  try {
-    const data = {};
-    if (name !== undefined) data.name = name;
-    if (price !== undefined) data.price = price;
-    if (perArch !== undefined) data.perArch = perArch;
-    const step = await prisma.serviceStep.update({ where: { id: req.params.id }, data });
-    res.json(step);
-  } catch (err) {
-    res.status(404).json({ error: "Step not found" });
-  }
-});
-
-router.delete("/service-steps/:id", async (req, res) => {
-  try {
-    await prisma.serviceStep.delete({ where: { id: req.params.id } });
-    res.json({ message: "Step deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this step has cases linked to it" });
-  }
-});
-
-// --- Add-ons (e.g. "Zirconia crown with gingival extension +200/crown") ---
-// General-purpose checkbox extras, attached to a Service Type, priced per
-// unit of whatever that Service Type's quantity turns out to be.
-
-router.post("/service-addons", async (req, res) => {
-  const { name, price, serviceTypeId } = req.body;
-  if (!name || price == null || !serviceTypeId) {
-    return res.status(400).json({ error: "name, price, and serviceTypeId are required" });
-  }
-  const addon = await prisma.serviceAddon.create({ data: { name, price, serviceTypeId } });
-  res.status(201).json(addon);
-});
-
-router.put("/service-addons/:id", async (req, res) => {
-  const { name, price } = req.body;
-  try {
-    const data = {};
-    if (name !== undefined) data.name = name;
-    if (price !== undefined) data.price = price;
-    const addon = await prisma.serviceAddon.update({ where: { id: req.params.id }, data });
-    res.json(addon);
-  } catch (err) {
-    res.status(404).json({ error: "Add-on not found" });
-  }
-});
-
-router.delete("/service-addons/:id", async (req, res) => {
-  try {
-    await prisma.serviceAddon.delete({ where: { id: req.params.id } });
-    res.json({ message: "Add-on deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this add-on has cases linked to it" });
-  }
-});
-
-// --- Existing entities ---
-
-router.delete("/services/:id", async (req, res) => {
-  try {
-    await prisma.service.delete({ where: { id: req.params.id } });
-    res.json({ message: "Service deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this service has service types or cases linked to it" });
-  }
-});
-
-router.delete("/service-types/:id", async (req, res) => {
-  try {
-    await prisma.serviceType.delete({ where: { id: req.params.id } });
-    res.json({ message: "Service type deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this service type has cases linked to it" });
-  }
-});
-
-router.delete("/warranties/:id", async (req, res) => {
-  try {
-    await prisma.warranty.delete({ where: { id: req.params.id } });
-    res.json({ message: "Warranty deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this warranty has cases linked to it" });
-  }
-});
-
-router.delete("/tooth-shades/:id", async (req, res) => {
-  try {
-    await prisma.toothShade.delete({ where: { id: req.params.id } });
-    res.json({ message: "Tooth shade deleted" });
-  } catch (err) {
-    res.status(400).json({ error: "Can't delete - this shade has cases linked to it" });
-  }
-});
-
-router.delete("/price-list/:id", async (req, res) => {
-  await prisma.priceListEntry.delete({ where: { id: req.params.id } });
-  res.json({ message: "Price entry deleted" });
+  res.json(patient);
 });
 
 module.exports = router;

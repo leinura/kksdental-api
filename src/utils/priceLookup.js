@@ -44,6 +44,19 @@ async function computeOrderPricing({
   archUpper,
   archLower,
 }) {
+  // Off-catalog custom request - no Service/Service Type was picked at
+  // all, since the client is describing something not in the app (to be
+  // discussed by phone). Price is left null for admin to fill in later.
+  if (!serviceTypeId) {
+    return {
+      unitPrice: null,
+      totalPrice: null,
+      quantity: null,
+      resolvedSteps: [],
+      resolvedAddons: [],
+    };
+  }
+
   const serviceType = await prisma.serviceType.findUnique({ where: { id: serviceTypeId } });
   if (!serviceType) {
     throw new Error("Service type not found");

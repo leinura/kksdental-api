@@ -264,17 +264,18 @@ model Case {
   caseCode       String         @unique // e.g. ORD-0042
   patientId      String
   clinicId       String
-  serviceId      String
-  serviceTypeId  String
+  serviceId      String?
+  serviceTypeId  String?
   warrantyId     String?
   toothShadeId   String?
   toothNumbers   String[] // FDI two-digit codes, e.g. ["11","12","21"]
   comment        String?        @db.Text
+  customRequestNote String?     @db.Text // off-catalog request, e.g. "please call - need X, not in the app"
   pickedUpAt     DateTime?
   photos         CasePhoto[]
   quantity       Int
-  unitPrice      Decimal        @db.Decimal(10, 2)
-  totalPrice     Decimal        @db.Decimal(10, 2)
+  unitPrice      Decimal?       @db.Decimal(10, 2)
+  totalPrice     Decimal?       @db.Decimal(10, 2)
   deliveryStatus DeliveryStatus @default(PENDING)
   paymentStatus  PaymentStatus  @default(UNPAID)
   createdById    String
@@ -290,8 +291,8 @@ model Case {
 
   patient      Patient       @relation(fields: [patientId], references: [id])
   clinic       Clinic        @relation(fields: [clinicId], references: [id])
-  service      Service       @relation(fields: [serviceId], references: [id])
-  serviceType  ServiceType   @relation(fields: [serviceTypeId], references: [id])
+  service      Service?      @relation(fields: [serviceId], references: [id])
+  serviceType  ServiceType?  @relation(fields: [serviceTypeId], references: [id])
   warranty     Warranty?     @relation(fields: [warrantyId], references: [id])
   toothShade   ToothShade?   @relation(fields: [toothShadeId], references: [id])
   transactions Transaction[]

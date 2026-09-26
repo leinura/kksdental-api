@@ -15,6 +15,13 @@ router.use(requireAuth);
 // whichever fields match the chosen Service Type's configuration (FDI
 // tooth numbers vs. Upper/Lower arch checkboxes, steps, tiered pricing,
 // sub-type+warranty, or the legacy system, plus optional add-ons).
+//
+// serviceId/serviceTypeId are now OPTIONAL: some services aren't in the
+// catalog at all (discussed by phone only) - a clinic can submit just a
+// customRequestNote instead, creating a real order with no price yet, for
+// admin to fill in later via PATCH /:id/price once they've talked it
+// through. Both a catalog selection AND a custom note can be present at
+// once (e.g. a normal crown order plus a separate request to discuss).
 router.post("/", requireRole("DENTIST"), async (req, res) => {
   const {
     patientId,
@@ -31,11 +38,17 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
     archUpper,
     archLower,
     comment,
+    customRequestNote,
     photos,
   } = req.body;
 
-  if (!patientId || !serviceId || !serviceTypeId) {
+  if (!patientId) {
     return res.status(400).json({ error: "Missing required case fields" });
+  }
+  if ((!serviceId || !serviceTypeId) && !customRequestNote?.trim()) {
+    return res
+      .status(400)
+      .json({ error: "Select a Service and Service Type, or describe the request in the custom note field" });
   }
 
   try {
@@ -65,8 +78,8 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
           caseCode,
           patientId,
           clinicId: req.user.clinicId,
-          serviceId,
-          serviceTypeId,
+          serviceId: serviceId || null,
+          serviceTypeId: serviceTypeId || null,
           warrantyId: warrantyId || null,
           serviceSubtypeId: serviceSubtypeId || null,
           serviceTypeWarrantyId: serviceTypeWarrantyId || null,
@@ -75,6 +88,7 @@ router.post("/", requireRole("DENTIST"), async (req, res) => {
           archUpper: !!archUpper,
           archLower: !!archLower,
           comment: comment || null,
+          customRequestNote: customRequestNote?.trim() || null,
           quantity: pricing.quantity,
           unitPrice: pricing.unitPrice,
           totalPrice: pricing.totalPrice,
@@ -242,6 +256,30 @@ router.patch("/:id/pickup", requireRole("ADMIN", "LAB_STAFF"), async (req, res) 
   const updated = await prisma.case.update({
     where: { id },
     data: { pickedUpAt: new Date() },
+  });
+
+  res.json(updated);
+});
+
+// PATCH /api/cases/:id/price - admin sets/updates the price on an order
+// that was placed with a custom request note instead of a catalog
+// selection (unitPrice/totalPrice start null in that case), once they've
+// discussed it with the clinic by phone. Also usable to correct a price on
+// any order, not just custom-request ones.
+router.patch("/:id/price", requireRole("ADMIN"), async (req, res) => {
+  const { id } = req.params;
+  const { unitPrice, totalPrice } = req.body;
+
+  if (unitPrice == null || totalPrice == null) {
+    return res.status(400).json({ error: "unitPrice and totalPrice are required" });
+  }
+
+  const existing = await prisma.case.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "Order not found" });
+
+  const updated = await prisma.case.update({
+    where: { id },
+    data: { unitPrice, totalPrice },
   });
 
   res.json(updated);
